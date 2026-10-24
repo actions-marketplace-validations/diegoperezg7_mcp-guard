@@ -176,18 +176,26 @@ export async function runScan(flags: ScanFlags, print: (s: string) => void): Pro
     throw err;
   }
 
-  print(render(report, flags.format, flags.verbose));
-  for (const { format, file } of outputs)
-    await writeFile(file, render(report, format, true, false), "utf8");
+  print(render(report, flags.format, { verbose: !!flags.verbose, failOn: flags.failOn }));
+  for (const { format, file } of outputs) {
+    await writeFile(
+      file,
+      render(report, format, { verbose: true, tty: false, failOn: flags.failOn }),
+      "utf8",
+    );
+  }
   return breaches(report.findings, flags.failOn) ? EXIT.findings : EXIT.pass;
 }
 
-export function render(
-  report: ScanReport,
-  format: Format,
-  verbose = false,
-  tty = !!process.stdout.isTTY,
-): string {
+export interface RenderOptions {
+  failOn: Severity | "none";
+  verbose?: boolean;
+  /** Whether stdout is a terminal; decides colour for the table. */
+  tty?: boolean;
+}
+
+export function render(report: ScanReport, format: Format, opts: RenderOptions): string {
+  const tty = opts.tty ?? !!process.stdout.isTTY;
   switch (format) {
     case "json":
       return toJson(report);
@@ -198,8 +206,10 @@ export function render(
     case "table":
       return toTable(report, {
         color: (tty && !process.env.NO_COLOR) || !!process.env.FORCE_COLOR,
+        unicode: tty,
         width: process.stdout.columns || 120,
-        verbose,
+        verbose: !!opts.verbose,
+        failOn: opts.failOn,
       });
   }
 }

@@ -114,10 +114,31 @@ describe("Markdown and table", () => {
   });
 
   it("table output has no ANSI codes when colour is off and wraps to the width", () => {
-    const out = toTable(report(), { color: false, width: 100 });
-    expect(out).not.toContain("\x1b[");
-    expect(out).toContain("MCPG-002");
-    for (const line of out.split("\n")) expect(line.length).toBeLessThanOrEqual(100);
+    for (const unicode of [false, true]) {
+      const out = toTable(report(), { color: false, width: 100, unicode, verbose: true });
+      expect(out).not.toContain("\x1b[");
+      expect(out).toContain("MCPG-002");
+      for (const line of out.split("\n")) expect([...line].length).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it("table output is plain ASCII without a terminal and groups findings by server and item", () => {
+    const out = toTable(report(), { color: false, width: 100, failOn: "high" });
+    expect(out).toMatch(/^[\x20-\x7e\n]*$/);
+    expect(out).toContain("== notes");
+    expect(out).toContain("`- tool add_note");
+    expect(out).toMatch(/\[! \] HIGH +MCPG-002/);
+    expect(out).toContain("FAIL  (fail-on high)");
+    expect(out).toContain("Result: FAIL (exit 1)");
+    expect(toTable(report(), { color: false, width: 100, failOn: "critical" })).toContain(
+      "Result: PASS (exit 0)",
+    );
+  });
+
+  it("table output uses colour and box drawing only when asked", () => {
+    const out = toTable(report(), { color: true, width: 100, unicode: true });
+    expect(out).toContain("\x1b[");
+    expect(out).toContain(String.fromCharCode(0x256d));
   });
 
   it("wrap keeps words whole and splits only overlong ones", () => {
