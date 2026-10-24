@@ -7,6 +7,7 @@ const CATEGORY_TITLE: Record<Rule["category"], string> = {
   secrets: "Secrets",
   transport: "Transport",
   runtime: "Runtime (--probe)",
+  coverage: "Coverage",
 };
 
 /** docs/rules.md, generated from the rule definitions so the two cannot drift. */

@@ -1,8 +1,10 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { RULES } from "../rules/index.js";
+import { printable } from "../text.js";
 import type { ScanReport } from "../scan.js";
 import type { Finding, ServerInventory, Severity } from "../types.js";
 import { ruleDocUrl } from "./links.js";
@@ -68,20 +70,47 @@ export function toSarif(report: ScanReport, cwd = process.cwd()): object {
           },
         },
         automationDetails: { id: "mcp-guard/" },
-        results: report.findings.map((f) => result(f, servers.get(f.location.server), cwd)),
+        results: withOccurrence(report.findings).map(({ f, occurrence }) =>
+          result(f, occurrence, servers.get(f.location.server), cwd),
+        ),
       },
     ],
   };
 }
 
-function result(f: Finding, server: ServerInventory | undefined, cwd: string): object {
+const findingKey = (f: Finding) =>
+  [f.ruleId, f.location.server, f.location.kind, f.location.name, f.location.field ?? ""].join(
+    "\u0000",
+  );
+
+/**
+ * Numbers findings that share rule and location (two secrets in one field),
+ * so each gets its own fingerprint. Findings are sorted, so the numbering is
+ * stable from one run to the next.
+ */
+function withOccurrence(findings: Finding[]): { f: Finding; occurrence: number }[] {
+  const seen = new Map<string, number>();
+  return findings.map((f) => {
+    const key = findingKey(f);
+    const occurrence = seen.get(key) ?? 0;
+    seen.set(key, occurrence + 1);
+    return { f, occurrence };
+  });
+}
+
+function result(
+  f: Finding,
+  occurrence: number,
+  server: ServerInventory | undefined,
+  cwd: string,
+): object {
   const l = f.location;
-  const where = `[${l.server}] ${l.kind} "${l.name}"${l.field ? ` (${l.field})` : ""}`;
+  const where = printable(`[${l.server}] ${l.kind} "${l.name}"${l.field ? ` (${l.field})` : ""}`);
   const text = [
-    `${where}: ${f.message}`,
-    f.evidence ? `Evidence: ${f.evidence}` : "",
+    `${where}: ${printable(f.message)}`,
+    f.evidence ? `Evidence: ${printable(f.evidence)}` : "",
     f.judge
-      ? `LLM judge (${f.judge.model}, informational): ${f.judge.verdict}. ${f.judge.reason}`
+      ? `LLM judge (${printable(f.judge.model)}, informational): ${f.judge.verdict}. ${printable(f.judge.reason)}`
       : "",
   ]
     .filter(Boolean)
@@ -99,8 +128,10 @@ function result(f: Finding, server: ServerInventory | undefined, cwd: string): o
         },
         logicalLocations: [
           {
-            name: l.name,
-            fullyQualifiedName: `${l.server}/${l.kind}/${l.name}${l.field ? `#${l.field}` : ""}`,
+            name: printable(l.name),
+            fullyQualifiedName: printable(
+              `${l.server}/${l.kind}/${l.name}${l.field ? `#${l.field}` : ""}`,
+            ),
             kind:
               l.kind === "tool"
                 ? "function"
@@ -113,11 +144,15 @@ function result(f: Finding, server: ServerInventory | undefined, cwd: string): o
     ],
     partialFingerprints: {
       "mcpGuardFinding/v1": createHash("sha256")
-        .update([f.ruleId, l.server, l.kind, l.name, l.field ?? ""].join("\u0000"))
+        .update(`${findingKey(f)}\u0000${occurrence}`)
         .digest("hex")
         .slice(0, 32),
     },
-    properties: { severity: f.severity, server: l.server, ...(f.judge ? { judge: f.judge } : {}) },
+    properties: {
+      severity: f.severity,
+      server: printable(l.server),
+      ...(f.judge ? { judge: f.judge } : {}),
+    },
   };
 }
 
@@ -134,7 +169,10 @@ function artifactFor(server: ServerInventory | undefined, cwd: string): string {
   return "mcp-guard.targets";
 }
 
+/** Repository-relative when the file is inside the working directory, otherwise an absolute file:// URI. */
 function toUri(path: string, cwd: string): string {
-  const rel = relative(cwd, resolve(cwd, path));
-  return rel.startsWith("..") ? resolve(cwd, path) : rel.split("\\").join("/");
+  const abs = resolve(cwd, path);
+  const rel = relative(cwd, abs);
+  if (rel === "" || rel.startsWith("..") || isAbsolute(rel)) return pathToFileURL(abs).href;
+  return rel.split(sep).map(encodeURIComponent).join("/");
 }

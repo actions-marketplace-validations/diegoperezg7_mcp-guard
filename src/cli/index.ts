@@ -1,5 +1,6 @@
 import { Command, CommanderError } from "commander";
 
+import { printable } from "../core/text.js";
 import { logger } from "../shared/logger.js";
 import { VERSION } from "../shared/version.js";
 import { buildRulesCommand } from "./commands/rules.js";
@@ -25,6 +26,7 @@ program.parseAsync(process.argv).catch((err: unknown) => {
     process.exit(err.exitCode === 0 ? EXIT.pass : EXIT.error);
   }
   if (!(err instanceof UsageError)) logger.debug({ err }, "unexpected error");
-  process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
+  // Error messages can quote what a server sent; print them inert.
+  process.stderr.write(`Error: ${printable(err instanceof Error ? err.message : String(err))}\n`);
   process.exit(EXIT.error);
 });

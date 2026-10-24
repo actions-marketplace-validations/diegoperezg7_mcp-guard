@@ -1,23 +1,13 @@
-<p align="center">
-  <img src="docs/assets/logo.svg" alt="mcp-guard logo" width="112" />
-</p>
+<img src="docs/assets/banner.svg" alt="mcp-guard: security scanner for MCP servers" width="100%" />
 
-<h1 align="center">mcp-guard</h1>
-
-<p align="center">
-  <strong>Security scanner for MCP servers.</strong> Finds tool poisoning, tool shadowing, excessive permissions, leaked secrets and weak transports before an agent connects, and fails CI when it does.
-</p>
-
-<p align="center">
+**Security scanner for MCP servers.** Finds tool poisoning, tool shadowing, excessive permissions, leaked secrets and weak transports before an agent connects, and fails CI when it does.
 
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-43853d?logo=node.js&logoColor=white)](.nvmrc)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.json)
-[![MCP SDK](https://img.shields.io/badge/MCP_SDK-1.32-4f46e5)](https://github.com/modelcontextprotocol/typescript-sdk)
-[![SARIF](https://img.shields.io/badge/SARIF-2.1.0-4f46e5)](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
-[![Rules](https://img.shields.io/badge/rules-22-4f46e5)](docs/rules.md)
+[![MCP SDK](https://img.shields.io/badge/MCP_SDK-1.32-c026d3)](https://github.com/modelcontextprotocol/typescript-sdk)
+[![SARIF](https://img.shields.io/badge/SARIF-2.1.0-c026d3)](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
+[![Rules](https://img.shields.io/badge/rules-24-c026d3)](docs/rules.md)
 [![Tests](https://img.shields.io/badge/tests-vitest-6e9f18?logo=vitest&logoColor=white)](tests)
-
-</p>
 
 <p align="center"><img src="docs/assets/cli.gif" alt="mcp-guard scanning two intentionally vulnerable demo servers and an exported tool list, then a clean reference server" width="100%" /></p>
 
@@ -28,6 +18,8 @@ An MCP client sends every tool description, schema and resource name straight in
 Code review rarely catches this, because the dangerous part is data the server returns at runtime, not code in the diff. mcp-guard connects to the server the way a client would, inventories what it exposes, and checks it against documented, deterministic rules. It is meant to run in CI next to your other security scanners.
 
 ## Quickstart
+
+To evaluate it locally (see [License](#license)):
 
 ```bash
 git clone https://github.com/diegoperezg7/mcp-guard && cd mcp-guard
@@ -60,7 +52,7 @@ node dist/cli/index.js scan \
 
 ## What it checks
 
-22 rules in five families. Every rule has an id, a severity, a description, a bad and a good example, a remediation and references; the full catalogue is in [docs/rules.md](docs/rules.md) (generated from the code, and a test fails if the two drift). `mcp-guard rules MCPG-012` prints one in the terminal.
+24 rules in six families, plus a coverage notice when input limits cut something. Every rule has an id, a severity, a description, a bad and a good example, a remediation and references; the full catalogue is in [docs/rules.md](docs/rules.md) (generated from the code, and a test fails if the two drift). `mcp-guard rules MCPG-012` prints one in the terminal.
 
 | ID                                 | Severity | Rule                                                                                                          |
 | ---------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------- |
@@ -73,6 +65,7 @@ node dist/cli/index.js scan \
 | **Shadowing**                      |          |                                                                                                               |
 | [MCPG-010](docs/rules.md#mcpg-010) | high     | The same tool name exposed by more than one server                                                            |
 | [MCPG-011](docs/rules.md#mcpg-011) | high     | Tool names that differ only by case, separators or homoglyphs                                                 |
+| [MCPG-013](docs/rules.md#mcpg-013) | high     | A tool or prompt name that mixes writing systems (Latin with a Cyrillic look-alike), even without a partner   |
 | [MCPG-012](docs/rules.md#mcpg-012) | high     | A description that tells the model how to use another server's tool                                           |
 | **Excessive permissions**          |          |                                                                                                               |
 | [MCPG-020](docs/rules.md#mcpg-020) | medium   | Destructive tool without `destructiveHint: true`                                                              |
@@ -92,8 +85,10 @@ node dist/cli/index.js scan \
 | [MCPG-050](docs/rules.md#mcpg-050) | high     | A tool result or resource tries to instruct the model (indirect prompt injection)                             |
 | [MCPG-051](docs/rules.md#mcpg-051) | high     | A credential comes back in a tool result or resource                                                          |
 | [MCPG-052](docs/rules.md#mcpg-052) | critical | The server echoes its own environment (canary variable leaked)                                                |
+| **Coverage**                       |          |                                                                                                               |
+| [MCPG-090](docs/rules.md#mcpg-090) | info     | Part of the server was not analysed because an input limit was reached                                        |
 
-The text rules read everything a client forwards to the model, not only descriptions: titles, property names, defaults, enum values and examples inside input and output schemas, resource and prompt metadata, and the server's `instructions`. Before matching, hidden text is decoded and zero-width characters removed, so `ig<U+200B>nore previous instructions` and a sentence written in Unicode tag characters are both caught. Evidence in every report is redacted: a credential never appears in full.
+The text rules read everything a client forwards to the model, not only descriptions: titles, property names, defaults, enum values and examples inside input and output schemas, resource and prompt metadata, and the server's `instructions`. Before matching, hidden text is decoded and zero-width characters removed, so `ig<U+200B>nore previous instructions` and a sentence written in Unicode tag characters are both caught. Evidence in every report is redacted: secrets are located in the whole text before an excerpt is cut, so a credential never appears in full, not even half of one.
 
 ## How it works
 
@@ -117,8 +112,8 @@ flowchart LR
   F --> O["table | JSON | Markdown | SARIF 2.1.0"]
   O --> X["exit 0 / 1 / 2"]
 
-  classDef core fill:#4f46e5,stroke:#3730a3,color:#ffffff
-  classDef opt fill:#eef2ff,stroke:#6366f1,color:#1e1b4b,stroke-dasharray: 4 3
+  classDef core fill:#c026d3,stroke:#86198f,color:#ffffff
+  classDef opt fill:#fdf4ff,stroke:#d946ef,color:#4a044e,stroke-dasharray: 4 3
   class D,I,R,R2,F,O core
   class P,J opt
 ```
@@ -126,7 +121,9 @@ flowchart LR
 - **Discovery** uses the official MCP TypeScript SDK as a client. A stdio server is started with the SDK's minimal environment (`PATH`, `HOME`...) plus a random canary variable, never with the scanner's own environment, so a CI runner's tokens are not handed to the code under test.
 - **Transport checks** send plain `initialize` requests and nothing else: one without credentials, one with `Host` and `Origin` set to a domain under the reserved `.invalid` TLD, and, for a localhost URL, one to each of the machine's own network addresses on the same port.
 - **Static rules** are pure functions of the inventory. Same input, same findings.
-- **The probe** (`--probe`, off by default) reads static resources and calls only tools that declare `readOnlyHint: true`. Arguments are the minimum valid values for the schema, with strings set to `mcp-guard-canary`. `--allow-unsafe` extends it to unannotated tools; a tool that declares `destructiveHint: true` is never called.
+- **The probe** (`--probe`, off by default) reads static resources and calls only tools that declare `readOnlyHint: true` and whose name does not contradict it: a "read-only" `send_email` or `delete_cache` (MCPG-020/021) is skipped. Arguments are built from types alone, strings set to `mcp-guard-canary`; the server's own `default` and `examples` values are never sent, and an enum value only when it is a plain identifier. `--allow-unsafe` extends the probe to unannotated tools and suspicious names; a tool that declares `destructiveHint: true` is never called.
+- **Input limits.** A scanned server controls every list length and string size, so the scanner bounds what it reads: items per list (`--max-items`, 1000), characters per field, result or resource (`--max-field-kb`, 1 MiB), inventory size per server (`--max-server-mb`, 10 MiB) and a wall-clock budget per server (`--server-timeout`, 120 s) on top of the per-request `--timeout`. Anything cut is reported as MCPG-090, never dropped silently. The text detectors are linear-time scanners, tested against inputs built to trigger catastrophic regex backtracking.
+- **Reports are inert.** Server-supplied text is untrusted in the output too: in the terminal, escape sequences, bidi and control characters are printed as visible codes (`\x1b`, `<U+202E>`); in Markdown, it is escaped, wrapped in code spans and its URLs defanged (`hxxps://`), so a tool name cannot add links, images or HTML to a pull request comment.
 - **The LLM judge** (`--judge-url`, `--judge-model`, off by default) sends only the text behind MCPG-005 findings to an OpenAI-compatible endpoint, such as Ollama at `http://localhost:11434/v1`, as delimited untrusted data. Its verdict is attached as context. It never adds, removes or re-rates a finding, so the exit code is identical with and without it.
 
 ## In CI
@@ -141,7 +138,7 @@ mcp-guard scan --stdio "node dist/server.js" --fail-on high --output sarif:mcp-g
 | `1`       | At least one finding at or above `--fail-on`                            |
 | `2`       | Usage error, or a target could not be reached or listed                 |
 
-[examples/github-workflow.yml](examples/github-workflow.yml) is a ready-to-copy workflow: it scans your server on every pull request, writes the Markdown report to the job summary and uploads SARIF with `github/codeql-action/upload-sarif`, so findings appear under **Security > Code scanning** with GitHub's own severity levels (each rule carries a `security-severity`) and stable fingerprints across runs. Each alert is attached to the file that defines the target (the exported JSON or the script a stdio command runs). This repository's own [ci.yml](.github/workflows/ci.yml) does the same against the demo servers.
+[examples/github-workflow.yml](examples/github-workflow.yml) shows the integration (the license does not grant use outside evaluation, so treat it as a reference, pinned to a commit): it scans your server on every pull request, writes the Markdown report to the job summary and uploads SARIF with `github/codeql-action/upload-sarif`, so findings appear under **Security > Code scanning** with GitHub's own severity levels (each rule carries a `security-severity`) and stable fingerprints across runs. Each alert is attached to the file that defines the target (the exported JSON or the script a stdio command runs). This repository's own [ci.yml](.github/workflows/ci.yml) does the same against the demo servers.
 
 The Markdown report, as GitHub renders it in a job summary or a pull request comment:
 
@@ -167,7 +164,7 @@ The Markdown report, as GitHub renders it in a job summary or a pull request com
 
 | Attacker                                                       | Example                                                                                    | Rules                       |
 | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------ | --------------------------- |
-| A malicious or compromised server you installed                | Poisoned descriptions, invisible instructions, impersonating another server's tool         | MCPG-001 to 005, 010 to 012 |
+| A malicious or compromised server you installed                | Poisoned descriptions, invisible instructions, impersonating another server's tool         | MCPG-001 to 005, 010 to 013 |
 | Content that reaches the model through an honest server        | A stored note, web page or email that contains instructions                                | MCPG-050                    |
 | Anyone on the same network or a web page in the user's browser | Calling a local server bound to `0.0.0.0`, DNS rebinding against `localhost`               | MCPG-040 to 043             |
 | The model itself, once steered                                 | Using a generic command runner, unconstrained paths or URLs, a write tool marked read-only | MCPG-020 to 025             |
@@ -179,9 +176,10 @@ The Markdown report, as GitHub renders it in a job summary or a pull request com
 
 - **It is not a sandbox or a runtime proxy.** It inspects a server before use; it does not sit between the client and the server and cannot block a call in production.
 - **Text rules are heuristics.** Instructions phrased in a way no pattern anticipates, in another language, or split across several fields will be missed; ordinary documentation can occasionally match. Each rule documents what it looks for so a finding can be judged quickly.
-- **Annotations are trusted for the probe.** A tool that lies with `readOnlyHint: true` will be called (MCPG-021 flags the obvious cases by name). That is why the probe is off by default and only sends canary values.
+- **Annotations are mostly trusted for the probe.** A tool that claims `readOnlyHint: true` with a write or destructive name is skipped, but one with an innocent name that lies will be called. That is why the probe is off by default, sends only canary values, and should run against a disposable instance.
 - **It sees the contract, not the implementation.** MCPG-023 cannot know whether the server validates paths internally, only that nothing in the schema says so.
 - **One point in time.** A server can change its tool list after the scan (a "rug pull"); scan in CI on every change and pin server versions.
+- **Limits are on analysis, not on the wire.** The MCP SDK receives each response whole before mcp-guard can cap it; a server can still make one response large. Scan untrusted servers in a container with a memory limit.
 - **No OAuth flow.** HTTP targets that need authentication take a static header (`-H "Authorization: Bearer ..."`).
 - **The secret patterns cover common formats only,** not every provider. Use a dedicated secret scanner on the server's source as well.
 
@@ -203,6 +201,7 @@ src/
   core/
     discover.ts   stdio, Streamable HTTP and JSON targets -> inventory
     httpChecks.ts TLS, anonymous access, foreign Host, LAN exposure
+    limits.ts     caps on items, field sizes, inventory size and time per server
     rules/        one file per family; each rule is metadata + a pure check
     probe.ts      read-only calls with canary inputs
     judge.ts      optional OpenAI-compatible classifier for MCPG-005

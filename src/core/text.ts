@@ -1,4 +1,4 @@
-import { redactSecrets } from "./secrets.js";
+import { redactSecrets, secretSpans } from "./secrets.js";
 import type { FindingLocation, JsonSchema, ServerInventory } from "./types.js";
 
 /** One piece of text a model will read, and where it came from. */
@@ -89,14 +89,19 @@ function* schemaStrings(schema: unknown, path: string): Generator<{ path: string
 
 /**
  * Characters that render as nothing (or reorder what is rendered) but still
- * reach the model: zero-width and bidi controls (Trojan Source), Unicode tag
- * characters (which smuggle a full ASCII string), variation selectors used for
- * the same purpose, and C0/C1 control codes other than tab and newline.
+ * reach the model: zero-width, joiner and bidi controls (Trojan Source), line
+ * and paragraph separators, Hangul fillers, Unicode tag characters (which
+ * smuggle a full ASCII string), variation selectors used for the same purpose
+ * (except U+FE0F after an emoji, where it is normal), and C0/C1 control codes
+ * other than tab and newline.
  */
-const INVISIBLE =
-  // Matching control characters is the point of this pattern.
-  // eslint-disable-next-line no-control-regex
-  /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F\u00AD\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]|[\u{E0000}-\u{E007F}]|[\u{E0100}-\u{E01EF}]/gu;
+const INVISIBLE_SOURCE =
+  "[\\u0000-\\u0008\\u000B\\u000C\\u000E-\\u001F\\u007F-\\u009F\\u00AD\\u034F\\u061C\\u115F\\u1160\\u17B4\\u17B5\\u180E\\u200B-\\u200F\\u2028-\\u202E\\u2060-\\u2064\\u2066-\\u2069\\u3164\\uFEFF\\uFFA0]" +
+  "|[\\u{E0000}-\\u{E007F}]|[\\u{E0100}-\\u{E01EF}]" +
+  "|(?<![\\p{Extended_Pictographic}#*0-9])[\\uFE00-\\uFE0F]";
+// Matching control and combining characters one by one is the point of this class.
+// eslint-disable-next-line no-misleading-character-class
+const INVISIBLE = new RegExp(INVISIBLE_SOURCE, "gu");
 
 export interface InvisibleHit {
   count: number;
@@ -106,7 +111,7 @@ export interface InvisibleHit {
 }
 
 export function findInvisible(text: string): InvisibleHit | undefined {
-  const matches = text.match(INVISIBLE);
+  const matches = clamp(text).match(INVISIBLE);
   if (!matches) return undefined;
   const codepoints = [...new Set(matches.map(codepoint))];
   let smuggled = "";
@@ -121,32 +126,54 @@ function codepoint(ch: string): string {
   return `U+${(ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
+const TAG_RUN = /[\u{E0000}-\u{E007F}]+/gu;
+
+function decodeTags(run: string): string {
+  return [...run].map((ch) => String.fromCharCode((ch.codePointAt(0) ?? 0) - 0xe0000)).join("");
+}
+
 /**
  * What the model effectively reads: tag-character runs decoded to ASCII and
  * other invisible characters removed, so "ig<U+200B>nore previous" or a
  * hidden tag sentence cannot slip past the text patterns.
  */
 export function decodeHidden(text: string): string {
-  return text
-    .replace(/[\u{E0000}-\u{E007F}]+/gu, (run) =>
-      [...run].map((ch) => String.fromCharCode((ch.codePointAt(0) ?? 0) - 0xe0000)).join(""),
-    )
-    .replace(INVISIBLE, "");
+  return text.replace(TAG_RUN, decodeTags).replace(INVISIBLE, "");
 }
 
 /** Replaces invisible characters with their code point so evidence is reviewable. */
 export function reveal(text: string): string {
   return text
-    .replace(/[\u{E0000}-\u{E007F}]+/gu, (run) => {
-      const decoded = [...run]
-        .map((ch) => String.fromCharCode((ch.codePointAt(0) ?? 0) - 0xe0000))
-        .join("");
-      return `<tags:${JSON.stringify(decoded.replace(/[^\x20-\x7e]/g, "?"))}>`;
-    })
+    .replace(
+      TAG_RUN,
+      (run) => `<tags:${JSON.stringify(decodeTags(run).replace(/[^\x20-\x7e]/g, "?"))}>`,
+    )
     .replace(INVISIBLE, (ch) => `<${codepoint(ch)}>`);
 }
 
+/**
+ * For anything printed to a terminal or rendered as Markdown: every control,
+ * escape, bidi and invisible character becomes a visible code (\x1b, <U+202E>),
+ * and line breaks become spaces. ESC sequences (colours, cursor moves, OSC 8
+ * links) from a server therefore cannot act on the reader's terminal.
+ */
+export function printable(text: string): string {
+  return reveal(text)
+    .replace(/[\t\n\r]/g, " ")
+    .replace(/<U\+00([0-9A-F]{2})>/g, (_, hex: string) => `\\x${hex.toLowerCase()}`);
+}
+
 // ---------------------------------------------------------------- patterns
+
+/**
+ * Upper bound on the characters a text rule reads per field. Every pattern
+ * below is linear, and this bound keeps even linear work small on hostile input.
+ */
+export const MAX_SCAN_CHARS = 256 * 1024;
+
+function clamp(text: string): string {
+  return text.length > MAX_SCAN_CHARS ? text.slice(0, MAX_SCAN_CHARS) : text;
+}
 
 export interface PatternHit {
   label: string;
@@ -154,30 +181,56 @@ export interface PatternHit {
   index: number;
 }
 
-export interface LabeledPattern {
-  label: string;
-  re: RegExp;
-}
+/** A regular expression, or a hand-written scanner where a regex would backtrack. */
+export type LabeledPattern =
+  | { label: string; re: RegExp }
+  | { label: string; scan: (text: string) => { index: number; length: number } | undefined };
 
 export function firstHit(
   text: string,
   patterns: readonly LabeledPattern[],
 ): PatternHit | undefined {
-  for (const { label, re } of patterns) {
-    const m = re.exec(text);
-    if (m) return { label, match: m[0], index: m.index };
+  const t = clamp(text);
+  for (const p of patterns) {
+    if ("re" in p) {
+      const m = p.re.exec(t);
+      if (m) return { label: p.label, match: m[0], index: m.index };
+    } else {
+      const h = p.scan(t);
+      if (h) return { label: p.label, match: t.slice(h.index, h.index + h.length), index: h.index };
+    }
   }
   return undefined;
 }
 
-/** A window of text around a match, single-line, for evidence. */
+/**
+ * A single-line window of text, for evidence. Secrets are found in the whole
+ * text first and the window is widened so that none is cut in half, then
+ * redacted: a partial credential never reaches a report.
+ */
 export function excerpt(text: string, index: number, length: number, radius = 60): string {
-  const start = Math.max(0, index - radius);
-  const end = Math.min(text.length, index + length + radius);
-  const body = redactSecrets(reveal(text.slice(start, end)))
+  let start = Math.max(0, index - radius);
+  let end = Math.min(text.length, index + length + radius);
+  // Widen to whole secrets and whole tag-character runs: a run may hide a secret
+  // that only becomes visible (and redactable) once decoded.
+  const spans = [
+    ...secretSpans(text),
+    ...[...text.matchAll(TAG_RUN)].map((m) => ({ start: m.index, end: m.index + m[0].length })),
+  ];
+  for (const s of spans) {
+    if (s.start < start && s.end > start) start = s.start;
+    if (s.start < end && s.end > end) end = s.end;
+  }
+  // Redact the raw text, then again after decoding hidden text.
+  const body = redactSecrets(reveal(redactSecrets(text.slice(start, end))))
     .replace(/\s+/g, " ")
     .trim();
   return `${start > 0 ? "..." : ""}${body}${end < text.length ? "..." : ""}`;
+}
+
+/** The start of a text, for evidence, with the same secret handling as excerpt. */
+export function head(text: string, max = 240): string {
+  return excerpt(text, 0, 0, max);
 }
 
 /** Instructions aimed at the model rather than at a human reading the docs. */
@@ -254,7 +307,55 @@ export const EXFILTRATION: readonly LabeledPattern[] = [
 
 /** Long HTML comments or whitespace walls that push text outside a reviewer's view. */
 export const HIDDEN_CONTENT: readonly LabeledPattern[] = [
-  { label: "HTML comment", re: /<!--[\s\S]*?-->/ },
-  { label: "whitespace padding", re: /(\s*\n){12,}|[ \t]{120,}/ },
-  { label: "encoded blob", re: /\b[A-Za-z0-9+/]{120,}={0,2}(?![A-Za-z0-9+/=])/ },
+  { label: "HTML comment", scan: scanHtmlComment },
+  { label: "whitespace padding", scan: scanWhitespaceWall },
+  { label: "encoded blob", scan: scanEncodedBlob },
 ];
+
+/** `<!-- ... -->`, or an unclosed `<!--` (which hides everything after it). One pass. */
+export function scanHtmlComment(text: string) {
+  const open = text.indexOf("<!--");
+  if (open === -1) return undefined;
+  const close = text.indexOf("-->", open + 4);
+  return { index: open, length: (close === -1 ? text.length : close + 3) - open };
+}
+
+/** A whitespace run with 12 or more line breaks, or 120 or more spaces and tabs. One pass. */
+export function scanWhitespaceWall(text: string) {
+  let runStart = -1;
+  let newlines = 0;
+  let blanks = 0;
+  for (let i = 0; i <= text.length; i++) {
+    const ch = text[i];
+    const ws =
+      ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f" || ch === "\v";
+    if (ws) {
+      if (runStart === -1) runStart = i;
+      if (ch === "\n") newlines++;
+      blanks = ch === " " || ch === "\t" ? blanks + 1 : 0;
+      if (newlines >= 12 || blanks >= 120) return { index: runStart, length: i + 1 - runStart };
+    } else {
+      runStart = -1;
+      newlines = 0;
+      blanks = 0;
+    }
+  }
+  return undefined;
+}
+
+/** 120 or more consecutive base64 characters. One pass. */
+export function scanEncodedBlob(text: string) {
+  let runStart = -1;
+  for (let i = 0; i <= text.length; i++) {
+    const c = text.charCodeAt(i);
+    const b64 =
+      (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 43 || c === 47;
+    if (b64) {
+      if (runStart === -1) runStart = i;
+    } else {
+      if (runStart !== -1 && i - runStart >= 120) return { index: runStart, length: i - runStart };
+      runStart = -1;
+    }
+  }
+  return undefined;
+}

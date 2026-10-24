@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   getDefaultEnvironment,
@@ -14,6 +14,7 @@ import { z } from "zod";
 import { logger } from "../shared/logger.js";
 import { VERSION } from "../shared/version.js";
 import { checkHttpTransport } from "./httpChecks.js";
+import { DEFAULT_LIMITS, enforceLimits, type Limits } from "./limits.js";
 import type { ServerInventory, TargetSource, ToolInfo } from "./types.js";
 
 export type Target =
@@ -27,6 +28,8 @@ export interface Connection {
   client?: Client;
   /** Canary injected into the server environment (stdio only). */
   canary?: string;
+  /** Epoch ms when this server's time budget runs out (live targets only). */
+  deadline?: number;
   close(): Promise<void>;
 }
 
@@ -38,16 +41,20 @@ export function newClient(): Client {
   return new Client({ name: "mcp-guard", version: VERSION }, { capabilities: {} });
 }
 
-/** Reads every list the server advertises, following pagination cursors. */
+/**
+ * Reads every list the server advertises, following pagination cursors up to
+ * the item limit, then applies the size limits (see limits.ts).
+ */
 export async function inventoryFromClient(
   client: Client,
   source: TargetSource,
   fallbackName: string,
+  limits: Limits = DEFAULT_LIMITS,
 ): Promise<ServerInventory> {
   const caps = client.getServerCapabilities() ?? {};
   const info = client.getServerVersion();
   const inv: ServerInventory = {
-    name: info?.name || fallbackName,
+    name: (info?.name || fallbackName).slice(0, 128),
     source,
     ...(info ? { serverInfo: { name: info.name, version: info.version } } : {}),
     ...(client.getInstructions() ? { instructions: client.getInstructions() } : {}),
@@ -55,38 +62,53 @@ export async function inventoryFromClient(
     resources: [],
     resourceTemplates: [],
     prompts: [],
+    truncated: [],
   };
+  const list = <R extends { nextCursor?: string }, T>(
+    what: string,
+    fetchPage: (cursor?: string) => Promise<R>,
+    pick: (r: R) => T[],
+  ) =>
+    paginate(fetchPage, pick, limits.maxItems, () =>
+      inv.truncated!.push(`${what} beyond the first ${limits.maxItems}`),
+    );
   if (caps.tools) {
     // The SDK types schemas loosely; the rules read them as plain JSON Schema.
-    inv.tools = (await paginate(
+    inv.tools = (await list(
+      "tools",
       (cursor) => client.listTools({ cursor }),
       (r) => r.tools,
     )) as ToolInfo[];
   }
   if (caps.resources) {
-    inv.resources = await paginate(
+    inv.resources = await list(
+      "resources",
       (cursor) => client.listResources({ cursor }),
       (r) => r.resources,
     );
-    inv.resourceTemplates = await paginate(
+    inv.resourceTemplates = await list(
+      "resource templates",
       (cursor) => client.listResourceTemplates({ cursor }),
       (r) => r.resourceTemplates,
     ).catch(() => []); // optional method; some servers answer MethodNotFound
   }
   if (caps.prompts) {
-    inv.prompts = await paginate(
+    inv.prompts = await list(
+      "prompts",
       (cursor) => client.listPrompts({ cursor }),
       (r) => r.prompts,
     );
   }
-  return inv;
+  return enforceLimits(inv, limits);
 }
 
-const MAX_PAGES = 50;
+const MAX_PAGES = 100;
 
 async function paginate<R extends { nextCursor?: string }, T>(
   fetchPage: (cursor?: string) => Promise<R>,
   pick: (r: R) => T[],
+  maxItems: number,
+  onTruncate: () => void,
 ): Promise<T[]> {
   const out: T[] = [];
   let cursor: string | undefined;
@@ -94,18 +116,25 @@ async function paginate<R extends { nextCursor?: string }, T>(
     const page = await fetchPage(cursor);
     out.push(...pick(page));
     cursor = page.nextCursor;
-    if (!cursor) break;
+    if (out.length > maxItems || (cursor && out.length === maxItems)) {
+      onTruncate();
+      return out.slice(0, maxItems);
+    }
+    if (!cursor) return out;
   }
+  onTruncate();
   return out;
 }
 
+export interface OpenOptions {
+  timeoutMs: number;
+  limits?: Limits;
+}
+
 /** Opens a target. A JSON export can hold several servers, hence the array. */
-export async function openTarget(
-  target: Target,
-  opts: { timeoutMs: number },
-): Promise<Connection[]> {
+export async function openTarget(target: Target, opts: OpenOptions): Promise<Connection[]> {
   if (target.kind === "json") {
-    return (await loadExports(target.path)).map((inventory) => ({
+    return (await loadExports(target.path, opts.limits)).map((inventory) => ({
       inventory,
       close: async () => {},
     }));
@@ -115,8 +144,10 @@ export async function openTarget(
 
 async function connect(
   target: Exclude<Target, { kind: "json" }>,
-  opts: { timeoutMs: number },
+  opts: OpenOptions,
 ): Promise<Connection> {
+  const limits = opts.limits ?? DEFAULT_LIMITS;
+  const deadline = Date.now() + limits.serverTimeoutMs;
   const client = newClient();
   let transport: Transport;
   let source: TargetSource;
@@ -143,22 +174,40 @@ async function connect(
     fallbackName = target.url;
   }
 
+  // Each step gets the per-request timeout, and all of them together the server's budget.
+  const left = (what: string) => {
+    const ms = Math.min(opts.timeoutMs, deadline - Date.now());
+    if (ms <= 0)
+      throw new Error(`server time budget (${limits.serverTimeoutMs} ms) exhausted before ${what}`);
+    return ms;
+  };
   try {
-    await withTimeout(client.connect(transport), opts.timeoutMs, `connecting to ${fallbackName}`);
+    await withTimeout(
+      client.connect(transport),
+      left("connecting"),
+      `connecting to ${fallbackName}`,
+    );
+    // Listing may take several pages, so it gets the whole remaining budget.
     const inventory = await withTimeout(
-      inventoryFromClient(client, source, fallbackName),
-      opts.timeoutMs,
+      inventoryFromClient(client, source, fallbackName, limits),
+      Math.max(1, deadline - Date.now()),
       `listing ${fallbackName}`,
     );
     if (target.kind === "http") {
       inventory.transport = await checkHttpTransport(
         target.url,
         target.headers ?? {},
-        opts.timeoutMs,
+        left("transport checks"),
       );
     }
     logger.info({ server: inventory.name, tools: inventory.tools.length }, "inventory collected");
-    return { inventory, client, ...(canary ? { canary } : {}), close: () => client.close() };
+    return {
+      inventory,
+      client,
+      deadline,
+      ...(canary ? { canary } : {}),
+      close: () => client.close(),
+    };
   } catch (err) {
     await client.close().catch(() => {});
     throw new TargetError(`Could not scan ${fallbackName}: ${explain(err)}`);
@@ -237,9 +286,18 @@ const ServerExport = z.object({
  * (`{ "servers": [{ "name": ..., "tools": [...] }] }`) so cross-server rules
  * can run without starting anything.
  */
-export async function loadExports(path: string): Promise<ServerInventory[]> {
+export async function loadExports(
+  path: string,
+  limits: Limits = DEFAULT_LIMITS,
+): Promise<ServerInventory[]> {
   let raw: unknown;
   try {
+    const { size } = await stat(path);
+    if (size > limits.maxServerChars) {
+      throw new Error(
+        `${size} bytes is over the ${limits.maxServerChars}-byte limit (--max-server-mb)`,
+      );
+    }
     raw = JSON.parse(await readFile(path, "utf8"));
   } catch (err) {
     throw new TargetError(
@@ -262,15 +320,25 @@ export async function loadExports(path: string): Promise<ServerInventory[]> {
       throw new TargetError(`${path}: not a tools/list export (${z.prettifyError(parsed.error)})`);
     }
     const s = parsed.data;
-    return {
-      name: s.name ?? (entries.length > 1 ? `${fallback}#${i + 1}` : fallback),
-      source: { kind: "json", path },
-      ...(s.instructions ? { instructions: s.instructions } : {}),
-      tools: s.tools as ServerInventory["tools"],
-      resources: s.resources as ServerInventory["resources"],
-      resourceTemplates: s.resourceTemplates as ServerInventory["resourceTemplates"],
-      prompts: s.prompts as ServerInventory["prompts"],
+    const truncated: string[] = [];
+    const cap = <T>(what: string, items: unknown[]): T[] => {
+      if (items.length > limits.maxItems)
+        truncated.push(`${what} beyond the first ${limits.maxItems}`);
+      return items.slice(0, limits.maxItems) as T[];
     };
+    return enforceLimits(
+      {
+        name: (s.name ?? (entries.length > 1 ? `${fallback}#${i + 1}` : fallback)).slice(0, 128),
+        source: { kind: "json", path },
+        ...(s.instructions ? { instructions: s.instructions } : {}),
+        tools: cap("tools", s.tools),
+        resources: cap("resources", s.resources),
+        resourceTemplates: cap("resource templates", s.resourceTemplates),
+        prompts: cap("prompts", s.prompts),
+        truncated,
+      },
+      limits,
+    );
   });
 }
 

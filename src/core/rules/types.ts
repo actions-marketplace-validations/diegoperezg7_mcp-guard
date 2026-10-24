@@ -1,7 +1,13 @@
 import type { Finding, ServerInventory, Severity } from "../types.js";
 
 export type RuleCategory =
-  "tool-poisoning" | "shadowing" | "excessive-permissions" | "secrets" | "transport" | "runtime";
+  | "tool-poisoning"
+  | "shadowing"
+  | "excessive-permissions"
+  | "secrets"
+  | "transport"
+  | "runtime"
+  | "coverage";
 
 export interface RuleReference {
   title: string;

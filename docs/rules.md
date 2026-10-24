@@ -13,6 +13,7 @@ Every rule is deterministic: the same inventory always produces the same finding
 | [MCPG-005](#mcpg-005) | low | tool-poisoning | static | Imperative phrasing addressed to the assistant |
 | [MCPG-010](#mcpg-010) | high | shadowing | static | Tool name exposed by more than one server |
 | [MCPG-011](#mcpg-011) | high | shadowing | static | Tool names that differ only by look-alike characters |
+| [MCPG-013](#mcpg-013) | high | shadowing | static | Tool or prompt name mixes writing systems |
 | [MCPG-012](#mcpg-012) | high | shadowing | static | Description changes how another server's tool behaves |
 | [MCPG-020](#mcpg-020) | medium | excessive-permissions | static | Destructive tool without destructiveHint |
 | [MCPG-021](#mcpg-021) | high | excessive-permissions | static | Tool marked read-only but named for a write |
@@ -28,6 +29,7 @@ Every rule is deterministic: the same inventory always produces the same finding
 | [MCPG-050](#mcpg-050) | high | runtime | probe | Tool result or resource tries to instruct the model |
 | [MCPG-051](#mcpg-051) | high | runtime | probe | Credential returned in a tool result or resource |
 | [MCPG-052](#mcpg-052) | critical | runtime | probe | Server echoes its environment |
+| [MCPG-090](#mcpg-090) | info | coverage | static | Part of the server was not analysed (input limit reached) |
 
 ## Tool poisoning
 
@@ -222,6 +224,32 @@ Good:
 References:
 
 - [MCP specification: Security Best Practices](https://modelcontextprotocol.io/specification/2025-06-18/basic/security_best_practices)
+- [CWE-1007: Insufficient Visual Distinction of Homoglyphs Presented to User](https://cwe.mitre.org/data/definitions/1007.html)
+
+<a id="mcpg-013"></a>
+
+### MCPG-013 Tool or prompt name mixes writing systems
+
+**Severity:** high · **Mode:** static · **SARIF name:** `MixedScriptIdentifier`
+
+The name combines letters from different scripts, typically Latin with a Cyrillic or Greek look-alike (r\u0435ad_file). No honest identifier needs that, and it is how a server prepares to impersonate a tool, even before the genuine one is installed next to it (MCPG-011 needs both).
+
+Bad:
+
+```text
+"name": "r\u0435ad_file"   (U+0435 is a Cyrillic e)
+```
+
+Good:
+
+```text
+"name": "read_file"
+```
+
+**Remediation.** Use ASCII identifiers for tool and prompt names ([a-z0-9_]).
+
+References:
+
 - [CWE-1007: Insufficient Visual Distinction of Homoglyphs Presented to User](https://cwe.mitre.org/data/definitions/1007.html)
 
 <a id="mcpg-012"></a>
@@ -526,7 +554,7 @@ new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableDnsRebi
 References:
 
 - [MCP specification: Transports (Streamable HTTP security warning)](https://modelcontextprotocol.io/specification/2025-06-18/basic/transports)
-- [CWE-350: Reliance on Reverse DNS Resolution for a Security-Critical Action](https://cwe.mitre.org/data/definitions/350.html)
+- [CWE-346: Origin Validation Error](https://cwe.mitre.org/data/definitions/346.html)
 
 <a id="mcpg-043"></a>
 
@@ -636,4 +664,33 @@ debug_info -> { "version": "1.4.0", "uptime_s": 312 }
 References:
 
 - [OWASP Top 10 for LLM Applications 2025: LLM02 Sensitive Information Disclosure](https://genai.owasp.org/llmrisk/llm022025-sensitive-information-disclosure/)
-- [CWE-526: Cleartext Storage of Sensitive Information in an Environment Variable](https://cwe.mitre.org/data/definitions/526.html)
+- [CWE-200: Exposure of Sensitive Information to an Unauthorized Actor](https://cwe.mitre.org/data/definitions/200.html)
+- [CWE-497: Exposure of Sensitive System Information to an Unauthorized Control Sphere](https://cwe.mitre.org/data/definitions/497.html)
+
+## Coverage
+
+<a id="mcpg-090"></a>
+
+### MCPG-090 Part of the server was not analysed (input limit reached)
+
+**Severity:** info · **Mode:** static · **SARIF name:** `ScanTruncated`
+
+The server returned more than the scanner's input limits allow (items per list, characters per field or result, total inventory size, or the per-server time budget), so part of it was cut before analysis. Findings for the rest are still valid, but the cut part was not checked. Oversized metadata is unusual in itself and worth a look.
+
+Bad:
+
+```text
+tools/list -> 25,000 tools, or a 40 MB description
+```
+
+Good:
+
+```text
+tools/list -> 12 tools with descriptions of a few hundred characters
+```
+
+**Remediation.** Check why the server exposes that much. If it is legitimate, raise the limits with --max-items, --max-field-kb, --max-server-mb or --server-timeout and scan again.
+
+References:
+
+- [OWASP Top 10 for LLM Applications 2025: LLM10 Unbounded Consumption](https://genai.owasp.org/llmrisk/llm102025-unbounded-consumption/)

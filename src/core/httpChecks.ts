@@ -103,8 +103,16 @@ interface RawResponse {
   body: string;
 }
 
-/** node:http rather than fetch: fetch does not allow overriding the Host header. */
-function post(
+/** Bytes read from a transport-check response; an initialize result is far smaller. */
+export const MAX_CHECK_BODY = 64 * 1024;
+
+/**
+ * node:http rather than fetch: fetch does not allow overriding the Host header.
+ * Settles exactly once: on the end of the response, after MAX_CHECK_BODY bytes
+ * (resolving with what was read), on error, or when the total timeout fires,
+ * however slowly the server trickles data.
+ */
+export function post(
   url: URL,
   body: string,
   headers: Record<string, string>,
@@ -113,11 +121,17 @@ function post(
 ): Promise<RawResponse> {
   const send = url.protocol === "https:" ? httpsRequest : httpRequest;
   return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      fn();
+    };
     const req = send(
       url,
       {
         method,
-        timeout: timeoutMs,
         headers: {
           "content-type": "application/json",
           accept: "application/json, text/event-stream",
@@ -127,20 +141,27 @@ function post(
       },
       (res) => {
         let data = "";
+        const done = () =>
+          finish(() => resolve({ status: res.statusCode ?? 0, headers: res.headers, body: data }));
         res.setEncoding("utf8");
         res.on("data", (chunk: string) => {
-          // An initialize result is small; stop reading anything that is not.
-          if (data.length < 64_000) data += chunk;
-          else res.destroy();
+          data += chunk;
+          if (data.length >= MAX_CHECK_BODY) {
+            data = data.slice(0, MAX_CHECK_BODY);
+            done();
+            res.destroy();
+          }
         });
-        res.on("end", () =>
-          resolve({ status: res.statusCode ?? 0, headers: res.headers, body: data }),
-        );
-        res.on("error", reject);
+        res.on("end", done);
+        res.on("close", done);
+        res.on("error", (err) => finish(() => reject(err)));
       },
     );
-    req.on("timeout", () => req.destroy(new Error("timeout")));
-    req.on("error", reject);
+    const timer = setTimeout(() => {
+      finish(() => reject(new Error(`timed out after ${timeoutMs} ms`)));
+      req.destroy();
+    }, timeoutMs);
+    req.on("error", (err) => finish(() => reject(err)));
     req.end(body);
   });
 }

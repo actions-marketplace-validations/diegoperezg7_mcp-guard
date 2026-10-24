@@ -65,9 +65,52 @@ const WRITES = new Set([
   "invite",
 ]);
 
-function nameVerbs(tool: ToolInfo, vocabulary: Set<string>): string[] {
-  return words(tool.name).filter((w) => vocabulary.has(w));
+/** Leading words that make a name a lookup whatever follows (get_run_status, list_commits). */
+const READS = new Set([
+  "get",
+  "list",
+  "read",
+  "fetch",
+  "search",
+  "find",
+  "query",
+  "show",
+  "describe",
+  "view",
+  "lookup",
+  "check",
+  "count",
+  "status",
+  "inspect",
+  "download",
+  "export",
+  "preview",
+  "explain",
+  "validate",
+  "compare",
+  "diff",
+  "summarize",
+  "resolve",
+  "ping",
+  "health",
+]);
+
+/**
+ * The verb of a tool name: its first word (delete_project), or its last word
+ * when the first one is a noun (project_delete). A name that starts with a
+ * read verb has no write verb, so get_commit or get_run_status do not count.
+ */
+export function nameVerb(name: string, vocabulary: Set<string>): string | undefined {
+  const w = words(name);
+  const first = w[0];
+  if (first === undefined || READS.has(first)) return undefined;
+  if (vocabulary.has(first)) return first;
+  const last = w[w.length - 1]!;
+  return w.length > 1 && vocabulary.has(last) ? last : undefined;
 }
+
+export const destructiveVerb = (tool: ToolInfo) => nameVerb(tool.name, DESTRUCTIVE);
+export const writeVerb = (tool: ToolInfo) => nameVerb(tool.name, WRITES);
 
 export const destructiveWithoutHint = defineRule(
   {
@@ -87,11 +130,11 @@ export const destructiveWithoutHint = defineRule(
   },
   (ctx, emit) => {
     forEachTool(ctx, (server, tool) => {
-      const verbs = nameVerbs(tool, DESTRUCTIVE);
-      if (verbs.length === 0 || tool.annotations?.destructiveHint === true) return;
+      const verb = destructiveVerb(tool);
+      if (!verb || tool.annotations?.destructiveHint === true) return;
       if (tool.annotations?.readOnlyHint === true) return; // MCPG-021 reports the contradiction.
       emit({
-        message: `Tool "${tool.name}" looks destructive ("${verbs.join('", "')}") but does not set destructiveHint: true.`,
+        message: `Tool "${tool.name}" looks destructive ("${verb}") but does not set destructiveHint: true.`,
         location: { server, kind: "tool", name: tool.name, field: "annotations" },
       });
     });
@@ -117,10 +160,10 @@ export const misleadingReadOnly = defineRule(
   (ctx, emit) => {
     forEachTool(ctx, (server, tool) => {
       if (tool.annotations?.readOnlyHint !== true) return;
-      const verbs = nameVerbs(tool, WRITES);
-      if (verbs.length === 0) return;
+      const verb = writeVerb(tool);
+      if (!verb) return;
       emit({
-        message: `Tool "${tool.name}" declares readOnlyHint: true but its name suggests a write ("${verbs.join('", "')}").`,
+        message: `Tool "${tool.name}" declares readOnlyHint: true but its name suggests a write ("${verb}").`,
         location: { server, kind: "tool", name: tool.name, field: "annotations.readOnlyHint" },
       });
     });
@@ -141,11 +184,13 @@ const COMMAND_ARG: ArgClass = {
 };
 const PATH_ARG: ArgClass = {
   names:
-    /^(path|paths|file|files|filename|filepath|file_?path|dir|dirname|directory|folder|src|source|dest|destination|target|location|.*_path|.*Path|.*_dir|.*_file)$/,
+    // Only names that mean a filesystem path; "location", "source" or "target" are as often a city or an id.
+    /^(path|paths|file|files|filename|filepath|file_?path|dir|dirname|directory|folder|.*_path|.*Path|.*_dir|.*Dir|.*_file|.*File|.*_filename)$/,
 };
 const URL_ARG: ArgClass = {
   names:
-    /^(url|uri|urls|endpoint|host|hostname|address|webhook|callback|link|href|.*_url|.*Url|.*_uri|.*_endpoint|.*_host)$/,
+    // Not "address" or "link": as often an email or postal address, or a document id.
+    /^(url|uri|urls|endpoint|host|hostname|webhook|href|.*_url|.*Url|.*_uri|.*Uri|.*_endpoint|.*_host|.*Host)$/,
   formats: ["uri", "url", "iri", "hostname", "uri-reference"],
 };
 

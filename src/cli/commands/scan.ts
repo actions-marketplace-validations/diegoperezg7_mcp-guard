@@ -6,6 +6,7 @@ import { toJson } from "../../core/report/json.js";
 import { toMarkdown } from "../../core/report/markdown.js";
 import { toSarif } from "../../core/report/sarif.js";
 import { toTable } from "../../core/report/table.js";
+import { DEFAULT_LIMITS } from "../../core/limits.js";
 import { breaches, scan, type ScanReport } from "../../core/scan.js";
 import { SEVERITIES, type Severity } from "../../core/types.js";
 
@@ -30,6 +31,10 @@ interface ScanFlags {
   judgeUrl?: string;
   judgeModel?: string;
   timeout: number;
+  serverTimeout: number;
+  maxItems: number;
+  maxFieldKb: number;
+  maxServerMb: number;
   verbose?: boolean;
 }
 
@@ -90,6 +95,30 @@ export function buildScanCommand(): Command {
     )
     .option("--judge-model <model>", "model name for the LLM judge")
     .option("--timeout <ms>", "per-request timeout", parsePositiveInt, 15_000)
+    .option(
+      "--server-timeout <ms>",
+      "total time budget per server",
+      parsePositiveInt,
+      DEFAULT_LIMITS.serverTimeoutMs,
+    )
+    .option(
+      "--max-items <n>",
+      "items read per list (tools, resources, prompts)",
+      parsePositiveInt,
+      DEFAULT_LIMITS.maxItems,
+    )
+    .option(
+      "--max-field-kb <kb>",
+      "characters analysed per field, result or resource, in KiB",
+      parsePositiveInt,
+      1024,
+    )
+    .option(
+      "--max-server-mb <mb>",
+      "inventory size analysed per server, in MiB",
+      parsePositiveInt,
+      10,
+    )
     .option("-v, --verbose", "show evidence in the table output")
     .addHelpText(
       "after",
@@ -123,6 +152,12 @@ export async function runScan(flags: ScanFlags, print: (s: string) => void): Pro
     report = await scan({
       targets,
       timeoutMs: flags.timeout,
+      limits: {
+        maxItems: flags.maxItems,
+        maxFieldChars: flags.maxFieldKb * 1024,
+        maxServerChars: flags.maxServerMb * 1024 * 1024,
+        serverTimeoutMs: flags.serverTimeout,
+      },
       ...(flags.probe ? { probe: { allowUnsafe: !!flags.allowUnsafe } } : {}),
       ...(flags.judgeUrl && flags.judgeModel
         ? {

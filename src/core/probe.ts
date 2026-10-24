@@ -2,6 +2,10 @@ import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 
 import { logger } from "../shared/logger.js";
 import { CANARY_ENV } from "./discover.js";
+import { capText, DEFAULT_LIMITS } from "./limits.js";
+import { scanTruncated, truncation } from "./rules/coverage.js";
+import { destructiveVerb, writeVerb } from "./rules/permissions.js";
+import { hiddenText } from "./rules/poisoning.js";
 import { environmentLeak, injectionInOutput, secretInOutput } from "./rules/runtime.js";
 import { findSecrets } from "./secrets.js";
 import {
@@ -12,14 +16,18 @@ import {
   firstHit,
   HIDDEN_CONTENT,
   MODEL_DIRECTED,
-  reveal,
+  head,
 } from "./text.js";
 import type { Finding, FindingLocation, JsonSchema, ServerInventory, ToolInfo } from "./types.js";
 
 export interface ProbeOptions {
-  /** Also call tools that are not annotated read-only. Off by default. */
+  /** Also call tools that are not annotated read-only, or whose name suggests a write. Off by default. */
   allowUnsafe: boolean;
   timeoutMs: number;
+  /** Cap on the characters inspected per result or resource. */
+  maxFieldChars?: number;
+  /** Epoch ms after which no further call is made to this server. */
+  deadline?: number;
 }
 
 export interface ProbeRecord {
@@ -39,19 +47,28 @@ export interface ProbeResult {
 export const CANARY_ARG = "mcp-guard-canary";
 
 /**
- * Which tools the probe may call. Only tools that declare readOnlyHint: true,
- * and are not also flagged destructive, are called by default. --allow-unsafe
- * widens that to unannotated tools; a tool that declares destructiveHint: true
- * and is not read-only is never called.
+ * Which tools the probe may call. By default only tools that declare
+ * readOnlyHint: true, are not also flagged destructive, and whose name does
+ * not contradict the claim (MCPG-020/021: delete_..., send_...).
+ * --allow-unsafe widens that to unannotated tools and to suspicious names; a
+ * tool that declares destructiveHint: true and is not read-only is never called.
  */
 export function probeDecision(
   tool: ToolInfo,
   allowUnsafe: boolean,
 ): { call: boolean; reason: string } {
   const a = tool.annotations ?? {};
-  if (a.readOnlyHint === true && a.destructiveHint !== true)
-    return { call: true, reason: "read-only" };
-  if (a.destructiveHint === true) return { call: false, reason: "declares destructiveHint: true" };
+  if (a.destructiveHint === true && a.readOnlyHint !== true) {
+    return { call: false, reason: "declares destructiveHint: true" };
+  }
+  if (a.destructiveHint === true) {
+    return { call: false, reason: "declares both readOnlyHint and destructiveHint" };
+  }
+  const verb = destructiveVerb(tool) ?? writeVerb(tool);
+  if (verb && !allowUnsafe) {
+    return { call: false, reason: `name suggests side effects ("${verb}"), needs --allow-unsafe` };
+  }
+  if (a.readOnlyHint === true) return { call: true, reason: verb ? "--allow-unsafe" : "read-only" };
   if (allowUnsafe) return { call: true, reason: "--allow-unsafe" };
   return {
     call: false,
@@ -69,72 +86,78 @@ export async function probeServer(
 ): Promise<ProbeResult> {
   const findings: Finding[] = [];
   const records: ProbeRecord[] = [];
+  const maxChars = opts.maxFieldChars ?? DEFAULT_LIMITS.maxFieldChars;
+  const record = (
+    kind: ProbeRecord["kind"],
+    target: string,
+    status: ProbeRecord["status"],
+    reason?: string,
+  ) => records.push({ server: server.name, target, kind, status, ...(reason ? { reason } : {}) });
+  /** Per-call timeout within what is left of the server's budget; undefined when it is spent. */
+  const budget = (): number | undefined => {
+    if (opts.deadline === undefined) return opts.timeoutMs;
+    const left = opts.deadline - Date.now();
+    return left > 0 ? Math.min(opts.timeoutMs, left) : undefined;
+  };
+  const inspect = (raw: string, location: FindingLocation) => {
+    const { text, truncated } = capText(raw, maxChars);
+    if (truncated) {
+      findings.push({
+        ruleId: scanTruncated.id,
+        severity: scanTruncated.severity,
+        ...truncation(
+          server.name,
+          `${location.kind} "${location.name}" returned more than ${maxChars} characters; only the start was inspected`,
+        ),
+      });
+    }
+    findings.push(...inspectOutput(text, location, opts.canary));
+  };
 
   for (const r of server.resources) {
-    const location: FindingLocation = {
-      server: server.name,
-      kind: "resource",
-      name: r.uri,
-      field: "contents",
-    };
+    const timeout = budget();
+    if (timeout === undefined) {
+      record("resource", r.uri, "skipped", "server time budget exhausted");
+      continue;
+    }
     try {
-      const res = await client.readResource({ uri: r.uri }, { timeout: opts.timeoutMs });
+      const res = await client.readResource({ uri: r.uri }, { timeout });
       const text = res.contents
         .map((c) => ("text" in c && typeof c.text === "string" ? c.text : ""))
         .join("\n");
-      findings.push(...inspectOutput(text, location, opts.canary));
-      records.push({ server: server.name, target: r.uri, kind: "resource", status: "called" });
+      inspect(text, { server: server.name, kind: "resource", name: r.uri, field: "contents" });
+      record("resource", r.uri, "called");
     } catch (err) {
-      records.push({
-        server: server.name,
-        target: r.uri,
-        kind: "resource",
-        status: "error",
-        reason: message(err),
-      });
+      record("resource", r.uri, "error", message(err));
     }
   }
 
   for (const tool of server.tools) {
     const decision = probeDecision(tool, opts.allowUnsafe);
     if (!decision.call) {
-      records.push({
-        server: server.name,
-        target: tool.name,
-        kind: "tool",
-        status: "skipped",
-        reason: decision.reason,
-      });
+      record("tool", tool.name, "skipped", decision.reason);
       continue;
     }
-    const location: FindingLocation = {
-      server: server.name,
-      kind: "tool",
-      name: tool.name,
-      field: "result",
-    };
+    const timeout = budget();
+    if (timeout === undefined) {
+      record("tool", tool.name, "skipped", "server time budget exhausted");
+      continue;
+    }
     try {
       const args = sampleArguments(tool.inputSchema);
       logger.info({ tool: tool.name, args }, "probing tool");
       const res = await client.callTool({ name: tool.name, arguments: args }, undefined, {
-        timeout: opts.timeoutMs,
+        timeout,
       });
-      findings.push(...inspectOutput(resultText(res), location, opts.canary));
-      records.push({
+      inspect(resultText(res), {
         server: server.name,
-        target: tool.name,
         kind: "tool",
-        status: "called",
-        reason: decision.reason,
+        name: tool.name,
+        field: "result",
       });
+      record("tool", tool.name, "called", decision.reason);
     } catch (err) {
-      records.push({
-        server: server.name,
-        target: tool.name,
-        kind: "tool",
-        status: "error",
-        reason: message(err),
-      });
+      record("tool", tool.name, "error", message(err));
     }
   }
   return { findings, records };
@@ -178,7 +201,7 @@ export function inspectOutput(raw: string, location: FindingLocation, canary?: s
   if (injection || invisible) {
     const what = injection
       ? injection.label
-      : `${invisible!.count} invisible character(s)${invisible!.smuggled ? ` hiding "${invisible!.smuggled}"` : ""}`;
+      : `${invisible!.count} invisible character(s)${invisible!.smuggled ? ` hiding "${hiddenText(invisible!.smuggled)}"` : ""}`;
     out.push({
       ruleId: injectionInOutput.id,
       severity: injectionInOutput.severity,
@@ -186,7 +209,7 @@ export function inspectOutput(raw: string, location: FindingLocation, canary?: s
       location,
       evidence: injection
         ? excerpt(decodeHidden(text), injection.index, injection.match.length)
-        : reveal(text).slice(0, 240),
+        : head(text),
     });
   }
 
@@ -203,20 +226,26 @@ export function inspectOutput(raw: string, location: FindingLocation, canary?: s
 }
 
 /**
- * Minimal valid arguments: required properties only, enums and consts
- * respected, strings set to the canary marker. Nothing in them is an exploit;
- * they exist to make a read-only tool return something to inspect.
+ * Minimal valid arguments built only from types and bounds: required
+ * properties, strings set to the canary marker. The server's own default and
+ * examples values are never sent, and an enum or const value is used only
+ * when it is a number, a boolean or a short plain identifier (a city, a unit);
+ * otherwise the canary goes in and the call may simply be rejected.
  */
 export function sampleArguments(schema: JsonSchema | undefined): Record<string, unknown> {
   const v = sampleValue(schema ?? { type: "object" }, 0);
   return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 
+function inertConstant(v: unknown): boolean {
+  if (typeof v === "boolean") return true;
+  if (typeof v === "number") return Number.isFinite(v) && Math.abs(v) <= 1e6;
+  return typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$/.test(v);
+}
+
 function sampleValue(s: JsonSchema, depth: number): unknown {
-  if (s.const !== undefined) return s.const;
-  if (Array.isArray(s.enum) && s.enum.length) return s.enum[0];
-  if (s.default !== undefined) return s.default;
-  if (Array.isArray(s.examples) && s.examples.length) return s.examples[0];
+  if (s.const !== undefined) return inertConstant(s.const) ? s.const : CANARY_ARG;
+  if (Array.isArray(s.enum) && s.enum.length) return s.enum.find(inertConstant) ?? CANARY_ARG;
   const variant = s.anyOf?.[0] ?? s.oneOf?.[0];
   if (variant) return sampleValue(variant, depth);
   const type = Array.isArray(s.type) ? s.type.find((t) => t !== "null") : s.type;
@@ -224,7 +253,7 @@ function sampleValue(s: JsonSchema, depth: number): unknown {
     case "object": {
       const out: Record<string, unknown> = {};
       if (depth > 4) return out;
-      for (const key of s.required ?? []) {
+      for (const key of (s.required ?? []).slice(0, 50)) {
         const sub = s.properties?.[key];
         out[key] = sub ? sampleValue(sub, depth + 1) : CANARY_ARG;
       }
@@ -237,7 +266,7 @@ function sampleValue(s: JsonSchema, depth: number): unknown {
     }
     case "integer":
     case "number":
-      return typeof s.minimum === "number" ? s.minimum : 1;
+      return inertConstant(s.minimum) ? s.minimum : 1;
     case "boolean":
       return false;
     case "null":

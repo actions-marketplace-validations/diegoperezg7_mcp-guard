@@ -1,6 +1,8 @@
-# Copy to .github/workflows/mcp-guard.yml in the repository of your MCP server.
-# Fails the pull request on any high or critical finding and shows every
-# finding in the Security tab (Code scanning) and in the job summary.
+# Integration example: how mcp-guard fits into the CI of an MCP server repository.
+# mcp-guard is proprietary (see LICENSE); its use outside evaluation needs the
+# author's written permission. The workflow fails the pull request on any high
+# or critical finding and shows every finding in the Security tab (Code
+# scanning) and in the job summary.
 name: mcp-guard
 
 on:
@@ -24,8 +26,9 @@ jobs:
 
       # Build your server first, e.g. npm ci && npm run build.
 
+      # Pin a reviewed commit rather than a moving branch: this is a security tool in your pipeline.
       - name: Install mcp-guard
-        run: npm install --no-save github:diegoperezg7/mcp-guard
+        run: npm install --no-save "github:diegoperezg7/mcp-guard#<commit-sha>"
 
       - name: Scan the server
         run: >

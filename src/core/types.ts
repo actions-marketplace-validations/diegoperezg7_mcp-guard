@@ -12,6 +12,8 @@ export interface ServerInventory {
   prompts: PromptInfo[];
   /** Facts gathered by the HTTP transport checks; absent for stdio and JSON. */
   transport?: TransportFacts;
+  /** What the input limits cut from this server, if anything (reported as MCPG-090). */
+  truncated?: string[];
 }
 
 export type TargetSource =

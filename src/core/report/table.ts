@@ -1,5 +1,6 @@
 import type { ScanReport } from "../scan.js";
 import { SEVERITIES, type Severity } from "../types.js";
+import { printable } from "../text.js";
 import { locationLabel } from "./markdown.js";
 
 export interface TableOptions {
@@ -45,9 +46,10 @@ export function toTable(report: ScanReport, opts: TableOptions): string {
     const rows = report.findings.map((f) => ({
       sev: f.severity,
       rule: f.ruleId,
-      where: `${f.location.server} > ${locationLabel(f)}`,
-      text: f.message + (f.judge ? ` [judge: ${f.judge.verdict}]` : ""),
-      evidence: f.evidence,
+      // Server-controlled text never reaches the terminal raw: no escape sequences, no bidi.
+      where: printable(`${f.location.server} > ${locationLabel(f)}`),
+      text: printable(f.message) + (f.judge ? ` [judge: ${f.judge.verdict}]` : ""),
+      evidence: f.evidence === undefined ? undefined : printable(f.evidence),
     }));
     const sevW = 8;
     const ruleW = 8;

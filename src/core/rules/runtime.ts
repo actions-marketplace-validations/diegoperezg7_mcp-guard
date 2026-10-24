@@ -50,6 +50,7 @@ export const environmentLeak = defineRule({
   good: `debug_info -> { "version": "1.4.0", "uptime_s": 312 }`,
   references: [
     REF.owaspLlm02,
-    REF.cwe(526, "Cleartext Storage of Sensitive Information in an Environment Variable"),
+    REF.cwe(200, "Exposure of Sensitive Information to an Unauthorized Actor"),
+    REF.cwe(497, "Exposure of Sensitive System Information to an Unauthorized Control Sphere"),
   ],
 });

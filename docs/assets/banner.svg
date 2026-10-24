@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="240" viewBox="0 0 1200 240" role="img" aria-label="mcp-guard: security scanner for MCP servers">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#D946EF"/>
+      <stop offset="1" stop-color="#86198F"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="240" rx="20" fill="url(#bg)"/>
+  <!-- scanned tool list -->
+  <g transform="translate(64 56)">
+    <rect x="22" y="14" width="78" height="14" rx="7" fill="#FFFFFF" opacity="0.5"/>
+    <rect x="22" y="56" width="102" height="14" rx="7" fill="#FFFFFF"/>
+    <rect x="22" y="98" width="60" height="14" rx="7" fill="#FFFFFF" opacity="0.5"/>
+    <path d="M10 38 H0 V88 H10 M136 38 H146 V88 H136" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <line x1="262" y1="56" x2="262" y2="184" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="2"/>
+  <text x="300" y="118" fill="#FFFFFF" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="64" font-weight="700">mcp-guard</text>
+  <text x="302" y="166" fill="#FDF4FF" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace" font-size="24">$ mcp-guard scan --stdio "node server.js" --fail-on high</text>
+</svg>

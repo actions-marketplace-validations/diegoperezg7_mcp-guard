@@ -7,10 +7,11 @@ import {
   HIDDEN_CONTENT,
   MODEL_DIRECTED,
   MODEL_DIRECTED_WEAK,
-  reveal,
+  head,
   textFields,
   type LabeledPattern,
 } from "../text.js";
+import { redactSecrets } from "../secrets.js";
 import { defineRule, REF, type Emit, type ScanContext } from "./types.js";
 
 function describeInvisible(codepoints: string[]): string {
@@ -19,6 +20,12 @@ function describeInvisible(codepoints: string[]): string {
   const parts = [...(tags.length ? ["Unicode tag characters"] : []), ...rest.slice(0, 6)];
   if (rest.length > 6) parts.push(`${rest.length - 6} more`);
   return parts.join(", ");
+}
+
+/** Decoded tag text for a message: trimmed, secrets redacted, bounded. */
+export function hiddenText(smuggled: string): string {
+  const t = redactSecrets(smuggled.trim());
+  return t.length > 200 ? `${t.slice(0, 200)}...` : t;
 }
 
 function patternCheck(patterns: readonly LabeledPattern[], what: string) {
@@ -60,11 +67,11 @@ export const invisibleCharacters = defineRule(
       for (const { location, text } of textFields(server)) {
         const hit = findInvisible(text);
         if (!hit) continue;
-        const smuggled = hit.smuggled ? ` Hidden text: "${hit.smuggled.trim()}"` : "";
+        const smuggled = hit.smuggled ? ` Hidden text: "${hiddenText(hit.smuggled)}"` : "";
         emit({
           message: `${hit.count} invisible character(s): ${describeInvisible(hit.codepoints)}.${smuggled}`,
           location,
-          evidence: reveal(text).slice(0, 240),
+          evidence: head(text),
         });
       }
     }

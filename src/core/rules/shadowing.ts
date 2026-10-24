@@ -129,6 +129,65 @@ function escapeNonAscii(s: string): string {
 const BEHAVIOUR =
   /\b(always|never|instead|whenever|must|should|before|after|also|redirect|replace|bcc|cc|override)\b/i;
 
+const SCRIPTS = [
+  "Latin",
+  "Cyrillic",
+  "Greek",
+  "Armenian",
+  "Georgian",
+  "Cherokee",
+  "Arabic",
+  "Hebrew",
+  "Han",
+  "Hiragana",
+  "Katakana",
+  "Hangul",
+].map((name) => ({ name, re: new RegExp(`\\p{Script=${name}}`, "u") }));
+
+/** Writing systems used by the letters of a name, e.g. ["Latin", "Cyrillic"] for a homoglyph. */
+export function scriptsOf(name: string): string[] {
+  const found = new Set<string>();
+  for (const ch of name) {
+    if (!/\p{L}/u.test(ch)) continue;
+    found.add(SCRIPTS.find((s) => s.re.test(ch))?.name ?? "Other");
+  }
+  return [...found];
+}
+
+export const mixedScriptName = defineRule(
+  {
+    id: "MCPG-013",
+    name: "MixedScriptIdentifier",
+    title: "Tool or prompt name mixes writing systems",
+    category: "shadowing",
+    severity: "high",
+    mode: "static",
+    description:
+      "The name combines letters from different scripts, typically Latin with a Cyrillic or Greek look-alike (r\\u0435ad_file). No honest identifier needs that, and it is how a server prepares to impersonate a tool, even before the genuine one is installed next to it (MCPG-011 needs both).",
+    remediation: "Use ASCII identifiers for tool and prompt names ([a-z0-9_]).",
+    bad: `"name": "r\\u0435ad_file"   (U+0435 is a Cyrillic e)`,
+    good: `"name": "read_file"`,
+    references: [REF.cwe(1007, "Insufficient Visual Distinction of Homoglyphs Presented to User")],
+  },
+  (ctx, emit) => {
+    for (const s of ctx.servers) {
+      const items = [
+        ...s.tools.map((t) => ({ kind: "tool" as const, name: t.name })),
+        ...s.prompts.map((p) => ({ kind: "prompt" as const, name: p.name })),
+      ];
+      for (const item of items) {
+        const scripts = scriptsOf(item.name);
+        if (scripts.length < 2) continue;
+        emit({
+          message: `Name mixes ${scripts.join(" and ")} letters.`,
+          location: { server: s.name, kind: item.kind, name: item.name, field: "name" },
+          evidence: escapeNonAscii(item.name),
+        });
+      }
+    }
+  },
+);
+
 export const crossServerReference = defineRule(
   {
     id: "MCPG-012",
@@ -173,7 +232,7 @@ function* foreignMentions(
   const text = tool.description ?? "";
   if (!text) return;
   for (const [name, servers] of owners) {
-    if (name === tool.name || servers.has(server.name)) continue;
+    if (name === tool.name || servers.has(server.name) || !identifierLike(name)) continue;
     const re = new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(name)}(?![A-Za-z0-9_])`);
     const m = re.exec(text);
     if (!m) continue;
@@ -185,6 +244,15 @@ function* foreignMentions(
     );
     if (BEHAVIOUR.test(sentence)) yield { name, owners: servers, index };
   }
+}
+
+/**
+ * Only names written as identifiers (send_email, createIssue) can be told
+ * apart from prose; a tool called "search" is mentioned in half of all
+ * descriptions without referring to it.
+ */
+function identifierLike(name: string): boolean {
+  return /[_\-.]/.test(name) || /[a-z][A-Z]/.test(name);
 }
 
 function sentenceEnd(text: string, from: number): number {

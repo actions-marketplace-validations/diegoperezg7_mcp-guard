@@ -84,10 +84,7 @@ export const missingRebindingProtection = defineRule(
       "Validate the Host and Origin headers against an allowlist. With the TypeScript SDK: enableDnsRebindingProtection: true with allowedHosts: ['127.0.0.1:3000', 'localhost:3000'].",
     bad: `new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })`,
     good: `new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableDnsRebindingProtection: true, allowedHosts: ["127.0.0.1:3000"] })`,
-    references: [
-      REF.mcpTransports,
-      REF.cwe(350, "Reliance on Reverse DNS Resolution for a Security-Critical Action"),
-    ],
+    references: [REF.mcpTransports, REF.cwe(346, "Origin Validation Error")],
   },
   (ctx, emit) =>
     forEachHttp(ctx.servers, (s, t) => {

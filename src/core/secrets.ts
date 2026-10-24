@@ -1,7 +1,8 @@
 /**
  * Credential detectors. Provider formats are matched by prefix and length;
- * the generic `key = value` form also needs enough entropy, so that
- * `password: <your password here>` in documentation does not fire.
+ * every candidate must also look random (entropy) and must not look like a
+ * documentation placeholder, so `sk-xxxxxxxx...` or `password: changeme`
+ * does not fire.
  */
 export interface SecretHit {
   kind: string;
@@ -11,70 +12,95 @@ export interface SecretHit {
   length: number;
 }
 
+/** Where a secret sits in a text, so evidence windows can avoid cutting through one. */
+export interface SecretSpan {
+  kind: string;
+  start: number;
+  end: number;
+}
+
 interface SecretPattern {
   kind: string;
   re: RegExp;
   /** Capture group holding the secret itself (defaults to the whole match). */
   group?: number;
+  /** Bits per character the secret part needs; omitted for fixed markers such as key headers. */
   minEntropy?: number;
 }
 
+// The `d` flag gives capture-group offsets, needed to redact only the secret part.
 const PATTERNS: readonly SecretPattern[] = [
-  { kind: "private key", re: /-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----/g },
-  { kind: "AWS access key id", re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g },
-  { kind: "GitHub token", re: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b/g },
-  { kind: "Slack token", re: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g },
-  { kind: "Stripe live key", re: /\b[rs]k_live_[A-Za-z0-9]{20,}\b/g },
-  { kind: "Google API key", re: /\bAIza[0-9A-Za-z_-]{35}\b/g },
-  { kind: "LLM provider API key", re: /\bsk-(?:proj-|ant-[a-z0-9]+-)?[A-Za-z0-9_-]{32,}\b/g },
+  { kind: "private key", re: /-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----/dg },
+  { kind: "AWS access key id", re: /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/dg, minEntropy: 3 },
+  {
+    kind: "GitHub token",
+    re: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{60,})\b/dg,
+    minEntropy: 3,
+  },
+  { kind: "Slack token", re: /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/dg, minEntropy: 3 },
+  { kind: "Stripe live key", re: /\b[rs]k_live_[A-Za-z0-9]{20,}\b/dg, minEntropy: 3 },
+  { kind: "Google API key", re: /\bAIza[0-9A-Za-z_-]{35}\b/dg, minEntropy: 3 },
+  {
+    kind: "LLM provider API key",
+    re: /\bsk-(?:proj-|ant-[a-z0-9]+-)?([A-Za-z0-9_-]{32,})\b/dg,
+    group: 1,
+    minEntropy: 3.5,
+  },
   {
     kind: "JSON Web Token",
-    re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g,
+    re: /\beyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/dg,
+    minEntropy: 3.5,
   },
   {
     kind: "password in a URL",
-    re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:([^\s@/]{6,})@[^\s/]+/gi,
+    re: /\b[a-z][a-z0-9+.-]{0,20}:\/\/[^\s:@/]{1,256}:([^\s@/]{6,256})@[^\s/]+/dgi,
     group: 1,
     minEntropy: 2.5,
   },
   {
     kind: "hard-coded secret",
-    re: /\b(?:api[_-]?key|secret(?:[_-]?key)?|access[_-]?token|auth[_-]?token|password|passwd)\b["']?\s*[:=]\s*["']?([A-Za-z0-9_\-/+=.]{16,})/gi,
+    re: /\b(?:api[_-]?key|secret(?:[_-]?key)?|access[_-]?token|auth[_-]?token|password|passwd)\b["']?\s{0,8}[:=]\s{0,8}["']?([A-Za-z0-9_\-/+=.]{16,512})/dgi,
     group: 1,
     minEntropy: 3.5,
   },
 ];
 
-export function findSecrets(text: string): SecretHit[] {
-  const hits: SecretHit[] = [];
-  const seen = new Set<string>();
+/** Values people put in docs and examples instead of a real credential. */
+const PLACEHOLDER =
+  /x{4,}|X{4,}|\*{3,}|\.{3}|0{6,}|1234|abcd|example|sample|dummy|placeholder|redacted|changeme|your[_-]?|<[^>]*>|\$\{|\{\{/i;
+
+export function secretSpans(text: string): SecretSpan[] {
+  const spans: SecretSpan[] = [];
   for (const p of PATTERNS) {
     for (const m of text.matchAll(p.re)) {
-      const secret = m[p.group ?? 0] ?? m[0];
-      if (p.minEntropy !== undefined && shannonEntropy(secret) < p.minEntropy) continue;
-      if (seen.has(secret)) continue;
-      seen.add(secret);
-      hits.push({
-        kind: p.kind,
-        redacted: redact(secret),
-        index: m.index ?? 0,
-        length: m[0].length,
-      });
+      const g = p.group ?? 0;
+      const secret = m[g];
+      const range = m.indices?.[g];
+      if (secret === undefined || !range) continue;
+      if (p.minEntropy !== undefined) {
+        if (shannonEntropy(secret) < p.minEntropy || PLACEHOLDER.test(secret)) continue;
+      }
+      if (spans.some((s) => s.start < range[1] && range[0] < s.end)) continue;
+      spans.push({ kind: p.kind, start: range[0], end: range[1] });
     }
   }
-  return hits;
+  return spans.sort((a, b) => a.start - b.start);
+}
+
+export function findSecrets(text: string): SecretHit[] {
+  return secretSpans(text).map((s) => ({
+    kind: s.kind,
+    redacted: redact(text.slice(s.start, s.end)),
+    index: s.start,
+    length: s.end - s.start,
+  }));
 }
 
 /** Evidence never carries a raw credential, whatever rule produced it. */
 export function redactSecrets(text: string): string {
   let out = text;
-  for (const p of PATTERNS) {
-    out = out.replace(p.re, (...m: unknown[]) => {
-      const whole = m[0] as string;
-      const secret = (p.group ? (m[p.group] as string | undefined) : undefined) ?? whole;
-      if (p.minEntropy !== undefined && shannonEntropy(secret) < p.minEntropy) return whole;
-      return whole.replace(secret, `${secret.slice(0, 4)}...[redacted]`);
-    });
+  for (const s of secretSpans(text).reverse()) {
+    out = `${out.slice(0, s.start)}${text.slice(s.start, s.start + 4)}...[redacted]${out.slice(s.end)}`;
   }
   return out;
 }

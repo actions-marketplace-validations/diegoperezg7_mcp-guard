@@ -107,7 +107,8 @@ describe("example servers over InMemoryTransport", () => {
       timeoutMs: 5000,
     });
     const called = records.filter((r) => r.status === "called").map((r) => r.target);
-    // send_email lies about being read-only; the probe trusts annotations, which is why MCPG-021 exists.
-    expect(called.sort()).toEqual(["fetch_url", "read_file", "send_email"]);
+    // send_email claims readOnlyHint but its name says otherwise (MCPG-021): skipped without --allow-unsafe.
+    expect(called.sort()).toEqual(["fetch_url", "read_file"]);
+    expect(records.find((r) => r.target === "send_email")?.reason).toMatch(/needs --allow-unsafe/);
   });
 });

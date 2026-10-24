@@ -1,6 +1,7 @@
 import { logger } from "../shared/logger.js";
 import { VERSION } from "../shared/version.js";
 import { openTarget, type Connection, type Target } from "./discover.js";
+import { DEFAULT_LIMITS, type Limits } from "./limits.js";
 import { judgeAmbiguous, type JudgeOptions } from "./judge.js";
 import { probeServer, type ProbeRecord } from "./probe.js";
 import { RULES } from "./rules/index.js";
@@ -16,6 +17,7 @@ export interface ScanOptions {
   targets: Target[];
   timeoutMs: number;
   probe?: { allowUnsafe: boolean };
+  limits?: Limits;
   judge?: Omit<JudgeOptions, "timeoutMs">;
 }
 
@@ -62,6 +64,8 @@ export async function scan(opts: ScanOptions): Promise<ScanReport> {
         const result = await probeServer(c.client, c.inventory, {
           allowUnsafe: opts.probe.allowUnsafe,
           timeoutMs: opts.timeoutMs,
+          maxFieldChars: (opts.limits ?? DEFAULT_LIMITS).maxFieldChars,
+          ...(c.deadline !== undefined ? { deadline: c.deadline } : {}),
           ...(c.canary ? { canary: c.canary } : {}),
         });
         findings.push(...result.findings);

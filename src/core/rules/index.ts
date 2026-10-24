@@ -15,13 +15,19 @@ import {
 } from "./permissions.js";
 import { environmentLeak, injectionInOutput, secretInOutput } from "./runtime.js";
 import { secretInMetadata } from "./secrets.js";
-import { confusableName, crossServerReference, nameCollision } from "./shadowing.js";
+import {
+  confusableName,
+  crossServerReference,
+  mixedScriptName,
+  nameCollision,
+} from "./shadowing.js";
 import {
   exposedWithoutAuth,
   missingRebindingProtection,
   plaintextHttp,
   remoteWithoutAuth,
 } from "./transport.js";
+import { scanTruncated } from "./coverage.js";
 import type { Rule } from "./types.js";
 
 /** Every rule, in id order. docs/rules.md and the SARIF rule table are generated from this list. */
@@ -33,6 +39,7 @@ export const RULES: readonly Rule[] = [
   ambiguousDirective,
   nameCollision,
   confusableName,
+  mixedScriptName,
   crossServerReference,
   destructiveWithoutHint,
   misleadingReadOnly,
@@ -48,6 +55,7 @@ export const RULES: readonly Rule[] = [
   injectionInOutput,
   secretInOutput,
   environmentLeak,
+  scanTruncated,
 ];
 
 export function getRule(id: string): Rule | undefined {
