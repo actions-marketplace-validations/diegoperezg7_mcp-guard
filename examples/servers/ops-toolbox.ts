@@ -1,15 +1,17 @@
 /**
- * INTENTIONALLY VULNERABLE DEMO SERVER. Run it only on a machine and network you control.
+ * INTENTIONALLY VULNERABLE DEMO SERVER. Localhost only; do not deploy it.
  *
  * An "ops toolbox" over Streamable HTTP with the permission and transport
  * mistakes mcp-guard detects: a generic command runner, unconstrained path and
- * URL arguments, missing or misleading annotations, a bind to 0.0.0.0 with no
- * authentication and no Host/Origin validation.
+ * URL arguments, missing or misleading annotations, no authentication and no
+ * Host/Origin validation.
  *
  * Every handler is a stub that only describes what it would have done: no
  * command runs, no file is read, no URL is fetched, nothing is deleted or sent.
  *
- *   PORT=3401 node dist/examples/ops-toolbox.js
+ *   node dist/examples/ops-toolbox.js                 (http://127.0.0.1:3401/mcp)
+ *   HOST=0.0.0.0 node dist/examples/ops-toolbox.js    (also on every interface, to demo MCPG-041;
+ *                                                      use it on a throwaway machine such as a CI runner)
  */
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
@@ -77,8 +79,9 @@ export function buildServer(): McpServer {
 
 if (isMain(import.meta.url)) {
   const port = Number(process.env.PORT ?? 3401);
-  // The bug on purpose: every interface, no auth, no enableDnsRebindingProtection.
-  statelessHttp(buildServer).listen(port, "0.0.0.0", () => {
-    process.stderr.write(`ops-toolbox (INTENTIONALLY VULNERABLE) on http://0.0.0.0:${port}/mcp\n`);
+  const host = process.env.HOST ?? "127.0.0.1";
+  // The bugs on purpose: no auth and no enableDnsRebindingProtection.
+  statelessHttp(buildServer).listen(port, host, () => {
+    process.stderr.write(`ops-toolbox (INTENTIONALLY VULNERABLE) on http://${host}:${port}/mcp\n`);
   });
 }

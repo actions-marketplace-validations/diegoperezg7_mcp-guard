@@ -10,7 +10,7 @@ export interface TableOptions {
 }
 
 const SEVERITY_COLOR: Record<Severity, string> = {
-  critical: "\x1b[1;37;41m",
+  critical: "\x1b[1;30;41m",
   high: "\x1b[1;31m",
   medium: "\x1b[33m",
   low: "\x1b[34m",

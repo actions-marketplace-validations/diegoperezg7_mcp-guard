@@ -60,7 +60,7 @@ export const invisibleCharacters = defineRule(
       for (const { location, text } of textFields(server)) {
         const hit = findInvisible(text);
         if (!hit) continue;
-        const smuggled = hit.smuggled ? ` Hidden text: "${hit.smuggled.trim()}".` : "";
+        const smuggled = hit.smuggled ? ` Hidden text: "${hit.smuggled.trim()}"` : "";
         emit({
           message: `${hit.count} invisible character(s): ${describeInvisible(hit.codepoints)}.${smuggled}`,
           location,

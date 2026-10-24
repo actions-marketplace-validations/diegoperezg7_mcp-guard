@@ -33,13 +33,10 @@ export function toMarkdown(report: ScanReport): string {
 
   if (total > 0) {
     out.push("### Findings", "");
-    out.push(
-      "| Severity | Rule | Server | Location | Finding |",
-      "| --- | --- | --- | --- | --- |",
-    );
+    out.push("| Severity | Rule | Location | Finding |", "| --- | --- | --- | --- |");
     for (const f of report.findings) {
       out.push(
-        `| ${f.severity} | [${f.ruleId}](${ruleDocUrl(f.ruleId)}) | ${cell(f.location.server)} | ${cell(locationLabel(f))} | ${cell(f.message)} |`,
+        `| ${f.severity} | [${f.ruleId}](${ruleDocUrl(f.ruleId)}) | ${cell(`${f.location.server} / ${locationLabel(f)}`)} | ${cell(f.message)} |`,
       );
     }
     out.push("");

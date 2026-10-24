@@ -1,0 +1,44 @@
+# Copy to .github/workflows/mcp-guard.yml in the repository of your MCP server.
+# Fails the pull request on any high or critical finding and shows every
+# finding in the Security tab (Code scanning) and in the job summary.
+name: mcp-guard
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  security-events: write # upload SARIF to code scanning
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Build your server first, e.g. npm ci && npm run build.
+
+      - name: Install mcp-guard
+        run: npm install --no-save github:diegoperezg7/mcp-guard
+
+      - name: Scan the server
+        run: >
+          npx mcp-guard scan
+          --stdio "node dist/server.js"
+          --fail-on high
+          --format markdown
+          --output sarif:mcp-guard.sarif
+          >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload SARIF
+        if: ${{ !cancelled() }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: mcp-guard.sarif
+          category: mcp-guard

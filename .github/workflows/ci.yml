@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+
+  # Scans the bundled demo servers and publishes the results to the Security tab.
+  # The demos are vulnerable on purpose, so this job reports but never fails the build.
+  scan-examples:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+      - name: Start the HTTP demo server
+        run: |
+          HOST=0.0.0.0 PORT=3401 node dist/examples/ops-toolbox.js &
+          for _ in $(seq 1 20); do curl -s -o /dev/null http://127.0.0.1:3401/mcp && break; sleep 0.5; done
+
+      - name: Scan
+        run: >
+          node dist/cli/index.js scan
+          --stdio "node --import tsx examples/servers/poisoned-notes.ts"
+          --http http://127.0.0.1:3401/mcp
+          --json examples/exports/mail-server.json
+          --probe
+          --fail-on none
+          --format markdown
+          --output sarif:mcp-guard.sarif
+          >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload SARIF
+        # Code scanning needs a public repository or GitHub Advanced Security.
+        if: ${{ !github.event.repository.private }}
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: mcp-guard.sarif
+          category: mcp-guard
