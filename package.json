@@ -27,7 +27,8 @@
     "format:check": "prettier --check .",
     "check": "npm run typecheck && npm run lint && npm run format:check && npm test",
     "prepare": "tsup",
-    "docs:rules": "tsx src/cli/index.ts rules --format markdown > docs/rules.md"
+    "docs:rules": "tsx src/cli/index.ts rules --format markdown > docs/rules.md",
+    "docs:screenshots": "node docs/screenshots.mjs"
   },
   "keywords": [
     "mcp",
@@ -57,6 +58,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.20.5",
     "eslint": "^10.13.0",
+    "playwright": "^1.64.1",
     "prettier": "^3.9.10",
     "tsup": "^9.0.0",
     "tsx": "^4.23.15",

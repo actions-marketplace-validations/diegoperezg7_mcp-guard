@@ -2,6 +2,7 @@ import { writeFile } from "node:fs/promises";
 import { Command, InvalidArgumentError, Option } from "commander";
 
 import { splitCommand, TargetError, type Target } from "../../core/discover.js";
+import { toHtml } from "../../core/report/html.js";
 import { toJson } from "../../core/report/json.js";
 import { toMarkdown } from "../../core/report/markdown.js";
 import { toSarif } from "../../core/report/sarif.js";
@@ -12,7 +13,7 @@ import { SEVERITIES, type Severity } from "../../core/types.js";
 
 export const EXIT = { pass: 0, findings: 1, error: 2 } as const;
 
-const FORMATS = ["table", "json", "markdown", "sarif"] as const;
+const FORMATS = ["table", "json", "markdown", "sarif", "html"] as const;
 type Format = (typeof FORMATS)[number];
 
 export class UsageError extends Error {}
@@ -25,6 +26,7 @@ interface ScanFlags {
   env: string[];
   format: Format;
   output: string[];
+  report?: string;
   failOn: Severity | "none";
   probe?: boolean;
   allowUnsafe?: boolean;
@@ -79,6 +81,7 @@ export function buildScanCommand(): Command {
       collect,
       [],
     )
+    .option("-r, --report <file>", "also write the HTML report to a file (same as -o html:<file>)")
     .addOption(
       new Option("--fail-on <severity>", "exit 1 when a finding is at or above this severity")
         .choices([...SEVERITIES, "none"])
@@ -141,6 +144,7 @@ Examples:
 export async function runScan(flags: ScanFlags, print: (s: string) => void): Promise<number> {
   const targets = parseTargets(flags);
   const outputs = flags.output.map(parseOutput);
+  if (flags.report) outputs.push({ format: "html", file: flags.report });
   if (flags.allowUnsafe && !flags.probe)
     throw new UsageError("--allow-unsafe only makes sense with --probe");
   if (!!flags.judgeUrl !== !!flags.judgeModel) {
@@ -203,6 +207,8 @@ export function render(report: ScanReport, format: Format, opts: RenderOptions):
       return toMarkdown(report);
     case "sarif":
       return `${JSON.stringify(toSarif(report), null, 2)}\n`;
+    case "html":
+      return toHtml(report, { failOn: opts.failOn });
     case "table":
       return toTable(report, {
         color: (tty && !process.env.NO_COLOR) || !!process.env.FORCE_COLOR,

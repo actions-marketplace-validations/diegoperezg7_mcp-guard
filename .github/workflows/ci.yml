@@ -18,6 +18,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # The HTML report tests open it in a real browser.
+      - run: npx playwright install --with-deps chromium
       - run: npm run check
       - run: npm run build
 
