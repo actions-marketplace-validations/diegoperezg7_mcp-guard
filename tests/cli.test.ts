@@ -64,6 +64,14 @@ describe("mcp-guard CLI output", () => {
     expect(readFileSync(`${dir}/r.md`, "utf8")).toContain("## mcp-guard report");
   });
 
+  it("writes the HTML report with -r and prints it with --format html", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mcp-guard-"));
+    const r = cli("scan", ...notes, "-r", `${dir}/r.html`, "--fail-on", "none");
+    expect(r.code).toBe(0);
+    expect(readFileSync(`${dir}/r.html`, "utf8")).toMatch(/^<!doctype html>/);
+    expect(cli("scan", ...weather, "--format", "html").stdout).toContain('"verdict":"pass"');
+  });
+
   it("keeps stdout clean JSON even while logging", () => {
     const r = spawnSync(
       process.execPath,

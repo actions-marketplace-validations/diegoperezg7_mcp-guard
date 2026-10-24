@@ -9,7 +9,7 @@
 [![Rules](https://img.shields.io/badge/rules-24-c026d3)](docs/rules.md)
 [![Tests](https://img.shields.io/badge/tests-vitest-6e9f18?logo=vitest&logoColor=white)](tests)
 
-<p align="center"><img src="docs/assets/cli.gif" alt="mcp-guard scanning two intentionally vulnerable demo servers and an exported tool list, then a clean reference server" width="100%" /></p>
+<p align="center"><img src="docs/assets/cli.gif" alt="mcp-guard scanning an intentionally vulnerable demo server with --probe and writing an HTML report, then a clean reference server" width="100%" /></p>
 
 ## Why
 
@@ -47,8 +47,25 @@ node dist/cli/index.js scan \
   --stdio "node dist/examples/poisoned-notes.js" \
   --http http://127.0.0.1:3401/mcp \
   --json examples/exports/mail-server.json \
-  --probe
+  --probe -r report.html                    # and open report.html in a browser
 ```
+
+## The HTML report
+
+`--format html`, or `-r report.html` next to any other output, writes a single self-contained file: no CDN, no network access, inline CSS and JS, light and dark themes. It opens with the verdict against `--fail-on` and the severity distribution, then the inventory of every server with its transport facts and risk, a rule-by-server matrix, and the findings grouped by server and tool. Each finding expands to the evidence, with hidden Unicode tag text, invisible characters and redacted credentials highlighted, plus the remediation and the CWE and OWASP references. Severity, rule and free-text filters narrow the list.
+
+<p align="center"><img src="docs/assets/report.png" alt="mcp-guard HTML report: FAIL verdict, 21 findings by severity, three scanned servers and the rule-by-server matrix" width="100%" /></p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/report-dark.png" alt="The same report in the dark theme" /></td>
+    <td width="50%"><img src="docs/assets/report-finding.png" alt="An expanded MCPG-001 finding: the text hidden in Unicode tag characters is revealed and highlighted in the evidence" /></td>
+  </tr>
+  <tr>
+    <td align="center">Dark theme</td>
+    <td align="center">A finding opened: the instruction hidden in invisible tag characters, revealed</td>
+  </tr>
+</table>
 
 ## What it checks
 
@@ -109,7 +126,7 @@ flowchart LR
   R --> F["Findings"]
   R2 --> F
   F -. "--judge-url" .-> J["LLM judge<br/>annotates MCPG-005 only"]
-  F --> O["table | JSON | Markdown | SARIF 2.1.0"]
+  F --> O["terminal | HTML | JSON | Markdown | SARIF 2.1.0"]
   O --> X["exit 0 / 1 / 2"]
 
   classDef core fill:#c026d3,stroke:#86198f,color:#ffffff
@@ -123,7 +140,7 @@ flowchart LR
 - **Static rules** are pure functions of the inventory. Same input, same findings.
 - **The probe** (`--probe`, off by default) reads static resources and calls only tools that declare `readOnlyHint: true` and whose name does not contradict it: a "read-only" `send_email` or `delete_cache` (MCPG-020/021) is skipped. Arguments are built from types alone, strings set to `mcp-guard-canary`; the server's own `default` and `examples` values are never sent, and an enum value only when it is a plain identifier. `--allow-unsafe` extends the probe to unannotated tools and suspicious names; a tool that declares `destructiveHint: true` is never called.
 - **Input limits.** A scanned server controls every list length and string size, so the scanner bounds what it reads: items per list (`--max-items`, 1000), characters per field, result or resource (`--max-field-kb`, 1 MiB), inventory size per server (`--max-server-mb`, 10 MiB) and a wall-clock budget per server (`--server-timeout`, 120 s) on top of the per-request `--timeout`. Anything cut is reported as MCPG-090, never dropped silently. The text detectors are linear-time scanners, tested against inputs built to trigger catastrophic regex backtracking.
-- **Reports are inert.** Server-supplied text is untrusted in the output too: in the terminal, escape sequences, bidi and control characters are printed as visible codes (`\x1b`, `<U+202E>`); in Markdown, it is escaped, wrapped in code spans and its URLs defanged (`hxxps://`), so a tool name cannot add links, images or HTML to a pull request comment.
+- **Reports are inert.** Server-supplied text is untrusted in the output too: in the terminal, escape sequences, bidi and control characters are printed as visible codes (`\x1b`, `<U+202E>`); in Markdown, it is escaped, wrapped in code spans and its URLs defanged (`hxxps://`), so a tool name cannot add links, images or HTML to a pull request comment; in the HTML report, it travels as escaped JSON and is rendered with `textContent` only, under a Content-Security-Policy that allows no network access and no script but the page's own (tests load hostile input in a real browser to check that nothing from it runs).
 - **The LLM judge** (`--judge-url`, `--judge-model`, off by default) sends only the text behind MCPG-005 findings to an OpenAI-compatible endpoint, such as Ollama at `http://localhost:11434/v1`, as delimited untrusted data. Its verdict is attached as context. It never adds, removes or re-rates a finding, so the exit code is identical with and without it.
 
 ## In CI
@@ -140,9 +157,7 @@ mcp-guard scan --stdio "node dist/server.js" --fail-on high --output sarif:mcp-g
 
 [examples/github-workflow.yml](examples/github-workflow.yml) shows the integration (the license does not grant use outside evaluation, so treat it as a reference, pinned to a commit): it scans your server on every pull request, writes the Markdown report to the job summary and uploads SARIF with `github/codeql-action/upload-sarif`, so findings appear under **Security > Code scanning** with GitHub's own severity levels (each rule carries a `security-severity`) and stable fingerprints across runs. Each alert is attached to the file that defines the target (the exported JSON or the script a stdio command runs). This repository's own [ci.yml](.github/workflows/ci.yml) does the same against the demo servers.
 
-The Markdown report, as GitHub renders it in a job summary or a pull request comment:
-
-<p align="center"><img src="docs/assets/report.png" alt="mcp-guard Markdown report rendered by GitHub: severity counts, scanned servers and the findings table" width="100%" /></p>
+Add `-r mcp-guard-report.html` and upload it with `actions/upload-artifact` to keep the browsable report of every run.
 
 ## Demo servers
 

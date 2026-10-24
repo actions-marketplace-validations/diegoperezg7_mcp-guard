@@ -22,6 +22,22 @@ const SEVERITY_COLOR: Record<Severity, string> = {
   info: "\x1b[2m",
 };
 
+/** One fill per severity, so the distribution bar reads without colour too. */
+const BAR_UNICODE: Record<Severity, string> = {
+  critical: "\u2588",
+  high: "\u2593",
+  medium: "\u2592",
+  low: "\u2591",
+  info: "\u00B7",
+};
+const BAR_ASCII: Record<Severity, string> = {
+  critical: "#",
+  high: "=",
+  medium: "-",
+  low: ".",
+  info: " ",
+};
+
 /** ASCII markers, readable with or without colour. */
 const ICON: Record<Severity, string> = {
   critical: "[!!]",
@@ -98,7 +114,10 @@ export function toTable(report: ScanReport, opts: TableOptions): string {
       const last = SEVERITIES.slice(i + 1).every((x) => !report.summary[x]);
       const len = last ? barWidth - used : Math.max(1, Math.round((barWidth * n) / total));
       used += len;
-      bar += paint(SEVERITY_COLOR[s].replace("1;30;41", "31"), (u ? "\u2588" : "#").repeat(len));
+      bar += paint(
+        SEVERITY_COLOR[s].replace("1;30;41", "31"),
+        (u ? BAR_UNICODE : BAR_ASCII)[s].repeat(len),
+      );
     });
     out.push(row(bar, barWidth));
   }
