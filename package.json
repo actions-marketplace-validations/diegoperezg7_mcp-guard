@@ -15,7 +15,8 @@
     "dist",
     "docs/rules.md",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "scripts": {
     "build": "tsup",
@@ -42,7 +43,7 @@
     "ci"
   ],
   "author": "Diego Pérez",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "Apache-2.0",
   "private": true,
   "repository": {
     "type": "git",

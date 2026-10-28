@@ -8,6 +8,7 @@
 [![SARIF](https://img.shields.io/badge/SARIF-2.1.0-c026d3)](https://docs.oasis-open.org/sarif/sarif/v2.1.0/sarif-v2.1.0.html)
 [![Rules](https://img.shields.io/badge/rules-24-c026d3)](docs/rules.md)
 [![Tests](https://img.shields.io/badge/tests-vitest-6e9f18?logo=vitest&logoColor=white)](tests)
+[![License](https://img.shields.io/badge/license-Apache--2.0-c026d3)](LICENSE)
 
 <p align="center"><img src="docs/assets/cli.gif" alt="mcp-guard scanning an intentionally vulnerable demo server with --probe and writing an HTML report, then a clean reference server" width="100%" /></p>
 
@@ -19,7 +20,7 @@ Code review rarely catches this, because the dangerous part is data the server r
 
 ## Quickstart
 
-To evaluate it locally (see [License](#license)):
+From source:
 
 ```bash
 git clone https://github.com/diegoperezg7/mcp-guard && cd mcp-guard
@@ -155,7 +156,7 @@ mcp-guard scan --stdio "node dist/server.js" --fail-on high --output sarif:mcp-g
 | `1`       | At least one finding at or above `--fail-on`                            |
 | `2`       | Usage error, or a target could not be reached or listed                 |
 
-[examples/github-workflow.yml](examples/github-workflow.yml) shows the integration (the license does not grant use outside evaluation, so treat it as a reference, pinned to a commit): it scans your server on every pull request, writes the Markdown report to the job summary and uploads SARIF with `github/codeql-action/upload-sarif`, so findings appear under **Security > Code scanning** with GitHub's own severity levels (each rule carries a `security-severity`) and stable fingerprints across runs. Each alert is attached to the file that defines the target (the exported JSON or the script a stdio command runs). This repository's own [ci.yml](.github/workflows/ci.yml) does the same against the demo servers.
+[examples/github-workflow.yml](examples/github-workflow.yml) shows the integration: it scans your server on every pull request, writes the Markdown report to the job summary and uploads SARIF with `github/codeql-action/upload-sarif`, so findings appear under **Security > Code scanning** with GitHub's own severity levels (each rule carries a `security-severity`) and stable fingerprints across runs. Each alert is attached to the file that defines the target (the exported JSON or the script a stdio command runs). This repository's own [ci.yml](.github/workflows/ci.yml) does the same against the demo servers.
 
 Add `-r mcp-guard-report.html` and upload it with `actions/upload-artifact` to keep the browsable report of every run.
 
@@ -230,4 +231,4 @@ tests/            unit tests per rule (positive and negative), probe, judge, rep
 
 ## License
 
-Proprietary. See [LICENSE](LICENSE). Viewing the source for evaluation is permitted; any other use requires written permission.
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE).

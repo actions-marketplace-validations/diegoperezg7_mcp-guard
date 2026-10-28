@@ -1,6 +1,5 @@
 # Integration example: how mcp-guard fits into the CI of an MCP server repository.
-# mcp-guard is proprietary (see LICENSE); its use outside evaluation needs the
-# author's written permission. The workflow fails the pull request on any high
+# The workflow fails the pull request on any high
 # or critical finding and shows every finding in the Security tab (Code
 # scanning) and in the job summary.
 name: mcp-guard
