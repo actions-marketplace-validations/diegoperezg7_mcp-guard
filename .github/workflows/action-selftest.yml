@@ -1,0 +1,73 @@
+# Runs the action from this checkout (uses: ./) against the demo servers: it must
+# fail on the intentionally vulnerable one and pass on the reference one.
+name: action-selftest
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  selftest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Builds the demo servers into dist/examples; the action itself runs from the committed dist/action.
+      - run: npm run build
+
+      - name: Scan the vulnerable demo
+        id: poisoned
+        uses: ./
+        continue-on-error: true
+        with:
+          stdio: node dist/examples/poisoned-notes.js
+          json: examples/exports/mail-server.json
+          probe: true
+          sarif-file: out/poisoned.sarif
+          html-report: out/poisoned.html
+
+      - name: It must have failed, with outputs
+        env:
+          OUTCOME: ${{ steps.poisoned.outcome }}
+          VERDICT: ${{ steps.poisoned.outputs.verdict }}
+          FINDINGS: ${{ steps.poisoned.outputs.findings }}
+          CRITICAL: ${{ steps.poisoned.outputs.critical }}
+          SARIF: ${{ steps.poisoned.outputs.sarif-file }}
+          HTML: ${{ steps.poisoned.outputs.html-report }}
+        run: |
+          set -eux
+          test "$OUTCOME" = failure
+          test "$VERDICT" = fail
+          test "$FINDINGS" -gt 0
+          test "$CRITICAL" -gt 0
+          test "$SARIF" = out/poisoned.sarif
+          test "$HTML" = out/poisoned.html
+          jq -e '.version == "2.1.0" and (.runs[0].results | length) > 0' "$SARIF"
+          grep -q '<!doctype html>' "$HTML"
+
+      - name: Scan the reference server
+        id: safe
+        uses: ./
+        with:
+          stdio: node dist/examples/weather-safe.js
+          sarif-file: out/safe.sarif
+
+      - name: It must have passed clean
+        env:
+          VERDICT: ${{ steps.safe.outputs.verdict }}
+          FINDINGS: ${{ steps.safe.outputs.findings }}
+          HTML: ${{ steps.safe.outputs.html-report }}
+        run: |
+          set -eux
+          test "$VERDICT" = pass
+          test "$FINDINGS" = 0
+          test -z "$HTML"
+          jq -e '.version == "2.1.0"' out/safe.sarif
