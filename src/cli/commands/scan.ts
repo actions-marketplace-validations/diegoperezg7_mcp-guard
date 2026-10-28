@@ -18,7 +18,7 @@ type Format = (typeof FORMATS)[number];
 
 export class UsageError extends Error {}
 
-interface ScanFlags {
+export interface ScanFlags {
   stdio: string[];
   http: string[];
   json: string[];
@@ -142,18 +142,37 @@ Examples:
 }
 
 export async function runScan(flags: ScanFlags, print: (s: string) => void): Promise<number> {
-  const targets = parseTargets(flags);
   const outputs = flags.output.map(parseOutput);
   if (flags.report) outputs.push({ format: "html", file: flags.report });
+  const report = await executeScan(flags);
+
+  print(render(report, flags.format, { verbose: !!flags.verbose, failOn: flags.failOn }));
+  for (const { format, file } of outputs) {
+    await writeFile(
+      file,
+      render(report, format, { verbose: true, tty: false, failOn: flags.failOn }),
+      "utf8",
+    );
+  }
+  return breaches(report.findings, flags.failOn) ? EXIT.findings : EXIT.pass;
+}
+
+/**
+ * Validates the flags, parses the targets (commands are split without a shell)
+ * and runs the scan. Shared by the CLI and the GitHub Action.
+ */
+export async function executeScan(
+  flags: Omit<ScanFlags, "format" | "output" | "report" | "verbose">,
+): Promise<ScanReport> {
+  const targets = parseTargets(flags);
   if (flags.allowUnsafe && !flags.probe)
     throw new UsageError("--allow-unsafe only makes sense with --probe");
   if (!!flags.judgeUrl !== !!flags.judgeModel) {
     throw new UsageError("--judge-url and --judge-model must be given together");
   }
 
-  let report: ScanReport;
   try {
-    report = await scan({
+    return await scan({
       targets,
       timeoutMs: flags.timeout,
       limits: {
@@ -179,16 +198,6 @@ export async function runScan(flags: ScanFlags, print: (s: string) => void): Pro
     if (err instanceof TargetError) throw new UsageError(err.message);
     throw err;
   }
-
-  print(render(report, flags.format, { verbose: !!flags.verbose, failOn: flags.failOn }));
-  for (const { format, file } of outputs) {
-    await writeFile(
-      file,
-      render(report, format, { verbose: true, tty: false, failOn: flags.failOn }),
-      "utf8",
-    );
-  }
-  return breaches(report.findings, flags.failOn) ? EXIT.findings : EXIT.pass;
 }
 
 export interface RenderOptions {
@@ -220,7 +229,9 @@ export function render(report: ScanReport, format: Format, opts: RenderOptions):
   }
 }
 
-function parseTargets(flags: ScanFlags): Target[] {
+function parseTargets(
+  flags: Pick<ScanFlags, "stdio" | "http" | "json" | "header" | "env">,
+): Target[] {
   const headers = Object.fromEntries(flags.header.map((h) => splitPair(h, ":", "--header")));
   const env = Object.fromEntries(flags.env.map((e) => splitPair(e, "=", "--env")));
   const targets: Target[] = [];
