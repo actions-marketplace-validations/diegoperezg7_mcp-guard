@@ -38,7 +38,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      security-events: write
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -65,10 +64,10 @@ jobs:
           --output sarif:mcp-guard.sarif
           >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload SARIF
-        # Code scanning needs a public repository or GitHub Advanced Security.
-        if: ${{ !github.event.repository.private }}
-        uses: github/codeql-action/upload-sarif@v4
+      # The demo servers are vulnerable on purpose, so their SARIF is kept as an
+      # artifact instead of being uploaded to this repository's code scanning.
+      - name: Keep the demo SARIF
+        uses: actions/upload-artifact@v5
         with:
-          sarif_file: mcp-guard.sarif
-          category: mcp-guard
+          name: mcp-guard-demo-sarif
+          path: mcp-guard.sarif
