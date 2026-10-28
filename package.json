@@ -1,6 +1,6 @@
 {
   "name": "mcp-guard",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Defensive security scanner for MCP servers: tool poisoning, shadowing, excessive permissions, leaked secrets and transport flaws, with SARIF output for CI.",
   "type": "module",
   "engines": {
