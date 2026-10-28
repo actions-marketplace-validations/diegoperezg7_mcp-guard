@@ -41383,11 +41383,12 @@ var MODEL_DIRECTED_WEAK = [
 var SENSITIVE_PATH = /(~|\$HOME|%USERPROFILE%)?[\\/]?\.(ssh|aws|gnupg|kube|docker)\b[^\s"'`]*|\bid_(rsa|ed25519|ecdsa)\b|(^|[\s"'`/])\.env(\.[a-z]+)?\b|\.(npmrc|netrc|pgpass|git-credentials)\b|\/etc\/(passwd|shadow)\b|\bmcp\.json\b/i;
 var SECRET_NOUN = "(api[\\s_-]?keys?|access\\s+tokens?|tokens?|passwords?|credentials?|secrets?|private\\s+keys?|session\\s+cookies?|conversation(\\s+history)?|chat\\s+history|previous\\s+messages|system\\s+prompt)";
 var EXFIL_VERB = "(read|include|send|pass|attach|upload|forward|post|copy|append|embed|leak|exfiltrate|collect)";
+var NOT_NEGATED = "(?<!(?:\\bnot|\\bnever|n't|\\bavoid)\\s+)";
 var EXFILTRATION = [
   { label: "reference to a credential file", re: SENSITIVE_PATH },
   {
     label: "request to move secrets or conversation data",
-    re: new RegExp(`\\b${EXFIL_VERB}\\b[^.\\n]{0,60}\\b${SECRET_NOUN}\\b`, "i")
+    re: new RegExp(`\\b${NOT_NEGATED}${EXFIL_VERB}\\b[^.\\n]{0,60}\\b${SECRET_NOUN}\\b`, "i")
   },
   {
     label: "request to send data to an external address",

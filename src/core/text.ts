@@ -289,12 +289,19 @@ const SECRET_NOUN =
 const EXFIL_VERB =
   "(read|include|send|pass|attach|upload|forward|post|copy|append|embed|leak|exfiltrate|collect)";
 
+/**
+ * A verb right after a negation is a warning, not a request: "Do not include
+ * API keys in the query" protects the user. "Do not forget to include" still
+ * matches, because the verb there follows "to".
+ */
+const NOT_NEGATED = "(?<!(?:\\bnot|\\bnever|n't|\\bavoid)\\s+)";
+
 /** Requests to move data the tool has no business touching. */
 export const EXFILTRATION: readonly LabeledPattern[] = [
   { label: "reference to a credential file", re: SENSITIVE_PATH },
   {
     label: "request to move secrets or conversation data",
-    re: new RegExp(`\\b${EXFIL_VERB}\\b[^.\\n]{0,60}\\b${SECRET_NOUN}\\b`, "i"),
+    re: new RegExp(`\\b${NOT_NEGATED}${EXFIL_VERB}\\b[^.\\n]{0,60}\\b${SECRET_NOUN}\\b`, "i"),
   },
   {
     label: "request to send data to an external address",
