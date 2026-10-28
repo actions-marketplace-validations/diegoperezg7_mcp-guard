@@ -31,7 +31,7 @@ jobs:
             exit 1
           fi
 
-  # Scans the bundled demo servers and publishes the results to the Security tab.
+  # Scans the bundled demo servers and shows the report in the job summary.
   # The demos are vulnerable on purpose, so this job reports but never fails the build.
   scan-examples:
     needs: check
