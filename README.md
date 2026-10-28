@@ -20,7 +20,7 @@ Code review rarely catches this, because the dangerous part is data the server r
 
 ## Quickstart
 
-From source:
+In a workflow, use the [GitHub Action](#github-action). From source:
 
 ```bash
 git clone https://github.com/diegoperezg7/mcp-guard && cd mcp-guard
@@ -144,7 +144,67 @@ flowchart LR
 - **Reports are inert.** Server-supplied text is untrusted in the output too: in the terminal, escape sequences, bidi and control characters are printed as visible codes (`\x1b`, `<U+202E>`); in Markdown, it is escaped, wrapped in code spans and its URLs defanged (`hxxps://`), so a tool name cannot add links, images or HTML to a pull request comment; in the HTML report, it travels as escaped JSON and is rendered with `textContent` only, under a Content-Security-Policy that allows no network access and no script but the page's own (tests load hostile input in a real browser to check that nothing from it runs).
 - **The LLM judge** (`--judge-url`, `--judge-model`, off by default) sends only the text behind MCPG-005 findings to an OpenAI-compatible endpoint, such as Ollama at `http://localhost:11434/v1`, as delimited untrusted data. Its verdict is attached as context. It never adds, removes or re-rates a finding, so the exit code is identical with and without it.
 
-## In CI
+## GitHub Action
+
+```yaml
+permissions:
+  contents: read
+  security-events: write # only for the SARIF upload
+
+steps:
+  - uses: actions/checkout@v5
+  # ... build your server ...
+  - name: Scan the server
+    id: mcp-guard
+    uses: diegoperezg7/mcp-guard@v1
+    with:
+      stdio: node dist/server.js
+      fail-on: high
+  - name: Upload SARIF
+    if: ${{ !cancelled() && steps.mcp-guard.outputs.sarif-file != '' }}
+    uses: github/codeql-action/upload-sarif@v4
+    with:
+      sarif_file: ${{ steps.mcp-guard.outputs.sarif-file }}
+      category: mcp-guard
+```
+
+The action runs the same scanner as the CLI, in-process from a bundled file (no `npm install`, no shell). It writes the SARIF report, and the HTML report when asked, appends the Markdown report to the job summary, sets the outputs below and fails the step when a finding reaches `fail-on`. It does not upload anything: the `upload-sarif` step above sends the SARIF to **Security > Code scanning**, where findings get GitHub's own severity levels (each rule carries a `security-severity`) and stable fingerprints across runs. Each alert is attached to the file that defines the target (the exported JSON or the script a stdio command runs). The full workflow is in [examples/github-workflow.yml](examples/github-workflow.yml).
+
+| Input            | Default           | Description                                                                                    |
+| ---------------- | ----------------- | ---------------------------------------------------------------------------------------------- |
+| `stdio`          |                   | Commands that start a server over stdio, one per line. Split into arguments without a shell    |
+| `http`           |                   | Streamable HTTP endpoints, one URL per line                                                    |
+| `json`           |                   | Paths to exported `tools/list` results, one per line                                           |
+| `fail-on`        | `high`            | Fail the step at or above this severity: `critical`, `high`, `medium`, `low`, `info` or `none` |
+| `probe`          | `false`           | Call read-only tools and read resources with canary inputs (see below)                         |
+| `allow-unsafe`   | `false`           | With `probe`, also call tools not annotated read-only (never one annotated destructive)        |
+| `sarif-file`     | `mcp-guard.sarif` | Where to write the SARIF 2.1.0 report                                                          |
+| `html-report`    |                   | Path for the self-contained HTML report; not written when empty                                |
+| `upload-summary` | `true`            | Append the Markdown report to the job summary                                                  |
+| `max-items`      | `1000`            | Items read per list (tools, resources, prompts)                                                |
+| `max-field-kb`   | `1024`            | Characters analysed per field, result or resource, in KiB                                      |
+| `server-timeout` | `120000`          | Total time budget per server, in milliseconds                                                  |
+
+At least one of `stdio`, `http` or `json` is required; several targets enable the cross-server shadowing rules.
+
+| Output        | Description                                       |
+| ------------- | ------------------------------------------------- |
+| `findings`    | Total number of findings                          |
+| `critical`    | Critical findings                                 |
+| `high`        | High findings                                     |
+| `medium`      | Medium findings                                   |
+| `low`         | Low findings                                      |
+| `verdict`     | `pass` or `fail`, against `fail-on`               |
+| `sarif-file`  | Path of the SARIF report                          |
+| `html-report` | Path of the HTML report, empty when not requested |
+
+**Job summary.** The summary opens with the verdict (for example "**Verdict: FAIL**: 8 findings at or above `high`"), then the count per severity, the scanned servers with their tool, resource and prompt counts, a findings table linking each rule to its documentation, and a collapsible block per finding with the redacted evidence and the remediation. It is the same Markdown renderer as `--format markdown`, so server-supplied text is escaped, kept in code spans and defanged: a tool name cannot add links, images or HTML to the page. The step log prints the terminal report with workflow commands suspended, so a server cannot smuggle `::set-output` or `::add-mask` lines into it.
+
+To keep the browsable HTML report of every run, set `html-report: mcp-guard-report.html` and upload it with `actions/upload-artifact`.
+
+**Security.** A `stdio` line is a command the runner executes, exactly as `--stdio` in the CLI: scanning a server runs its code. `probe: true` goes further and calls its tools. Scan servers you do not trust only on ephemeral, GitHub-hosted runners (never a self-hosted runner that keeps state or credentials), give the job the minimum `permissions`, and do not expose secrets to the step. Servers are started with a minimal environment, not the runner's, so `GITHUB_TOKEN` and other variables of the job are not passed to them. This repository's [action-selftest.yml](.github/workflows/action-selftest.yml) runs the action against the demo servers on every change.
+
+## CLI in CI
 
 ```bash
 mcp-guard scan --stdio "node dist/server.js" --fail-on high --output sarif:mcp-guard.sarif
@@ -156,9 +216,7 @@ mcp-guard scan --stdio "node dist/server.js" --fail-on high --output sarif:mcp-g
 | `1`       | At least one finding at or above `--fail-on`                            |
 | `2`       | Usage error, or a target could not be reached or listed                 |
 
-[examples/github-workflow.yml](examples/github-workflow.yml) shows the integration: it scans your server on every pull request, writes the Markdown report to the job summary and uploads SARIF with `github/codeql-action/upload-sarif`, so findings appear under **Security > Code scanning** with GitHub's own severity levels (each rule carries a `security-severity`) and stable fingerprints across runs. Each alert is attached to the file that defines the target (the exported JSON or the script a stdio command runs). This repository's own [ci.yml](.github/workflows/ci.yml) does the same against the demo servers.
-
-Add `-r mcp-guard-report.html` and upload it with `actions/upload-artifact` to keep the browsable report of every run.
+This repository's own [ci.yml](.github/workflows/ci.yml) runs the CLI against the demo servers and uploads the SARIF. Add `-r mcp-guard-report.html` to keep the browsable report.
 
 ## Demo servers
 
@@ -208,11 +266,13 @@ Add `-r mcp-guard-report.html` and upload it with `actions/upload-artifact` to k
 ```bash
 npm run check        # typecheck, eslint, prettier, vitest
 npm run docs:rules   # regenerate docs/rules.md from the rule definitions
+npm run build:action # rebuild dist/action/index.js (committed; CI fails when it is stale)
 vhs docs/cli.tape    # re-record docs/assets/cli.gif (after npm run build)
 ```
 
 ```
 src/
+  action/         GitHub Action entry point, bundled into dist/action/index.js
   cli/            commander entry point: scan, rules
   core/
     discover.ts   stdio, Streamable HTTP and JSON targets -> inventory
