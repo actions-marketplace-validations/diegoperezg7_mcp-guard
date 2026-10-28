@@ -20,6 +20,7 @@
   ],
   "scripts": {
     "build": "tsup",
+    "build:action": "tsup --config tsup.action.config.ts",
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
