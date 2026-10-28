@@ -2,6 +2,7 @@
 
 **Security scanner for MCP servers.** Finds tool poisoning, tool shadowing, excessive permissions, leaked secrets and weak transports before an agent connects, and fails CI when it does.
 
+[![GitHub Marketplace](https://img.shields.io/badge/Marketplace-mcp--guard-c026d3?logo=github)](https://github.com/marketplace/actions/mcp-guard-mcp-security-scan)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-43853d?logo=node.js&logoColor=white)](.nvmrc)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178c6?logo=typescript&logoColor=white)](tsconfig.json)
 [![MCP SDK](https://img.shields.io/badge/MCP_SDK-1.32-c026d3)](https://github.com/modelcontextprotocol/typescript-sdk)
