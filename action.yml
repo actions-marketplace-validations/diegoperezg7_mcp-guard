@@ -1,0 +1,83 @@
+name: mcp-guard MCP security scan
+description: Scan MCP servers for tool poisoning, shadowing, excessive permissions, leaked secrets and weak transports.
+author: Diego Pérez
+
+branding:
+  icon: shield
+  color: purple
+
+inputs:
+  stdio:
+    description: >
+      Commands that start a server over stdio, one per line (e.g. `node dist/server.js`).
+      Each line is split into a command and arguments without a shell, like the CLI's --stdio.
+    required: false
+    default: ""
+  http:
+    description: Streamable HTTP endpoints to scan, one URL per line.
+    required: false
+    default: ""
+  json:
+    description: Paths to exported tools/list results, one per line.
+    required: false
+    default: ""
+  fail-on:
+    description: Fail the step when a finding is at or above this severity (critical, high, medium, low, info, none).
+    required: false
+    default: high
+  probe:
+    description: >
+      Call read-only tools and read resources with canary inputs. This runs the server's own
+      code paths; scan untrusted servers only on ephemeral runners.
+    required: false
+    default: "false"
+  allow-unsafe:
+    description: With probe, also call tools that are not annotated read-only (never destructive ones).
+    required: false
+    default: "false"
+  sarif-file:
+    description: Where to write the SARIF 2.1.0 report, for github/codeql-action/upload-sarif.
+    required: false
+    default: mcp-guard.sarif
+  html-report:
+    description: Optional path for the self-contained HTML report.
+    required: false
+    default: ""
+  upload-summary:
+    description: Append the Markdown report to the job summary.
+    required: false
+    default: "true"
+  max-items:
+    description: Items read per list (tools, resources, prompts).
+    required: false
+    default: "1000"
+  max-field-kb:
+    description: Characters analysed per field, result or resource, in KiB.
+    required: false
+    default: "1024"
+  server-timeout:
+    description: Total time budget per server, in milliseconds.
+    required: false
+    default: "120000"
+
+outputs:
+  findings:
+    description: Total number of findings.
+  critical:
+    description: Number of critical findings.
+  high:
+    description: Number of high findings.
+  medium:
+    description: Number of medium findings.
+  low:
+    description: Number of low findings.
+  verdict:
+    description: pass or fail, against fail-on.
+  sarif-file:
+    description: Path of the SARIF report.
+  html-report:
+    description: Path of the HTML report, empty when not requested.
+
+runs:
+  using: node24
+  main: dist/action/index.js
