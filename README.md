@@ -258,6 +258,10 @@ This repository's own [ci.yml](.github/workflows/ci.yml) runs the CLI against th
 - **No OAuth flow.** HTTP targets that need authentication take a static header (`-H "Authorization: Bearer ..."`).
 - **The secret patterns cover common formats only,** not every provider. Use a dedicated secret scanner on the server's source as well.
 
+## Field study
+
+mcp-guard was run on 14 public MCP servers: the reference servers from `modelcontextprotocol/servers`, plus Playwright, Chrome DevTools, Context7, Notion, Desktop Commander, MarkItDown and DuckDuckGo. Each ran in a container with no network and only its metadata was analysed. No tool was called. The scan found nothing malicious. 67 of the 75 findings are by design: path and URL arguments whose limits the servers enforce in code but never declare in the schema. Annotations turned out to be the norm (163 of 167 tools declare them). The two false positives in MCPG-003 were fixed. Method, per-server tables and the review of every finding are in [docs/field-study.md](docs/field-study.md), and [scripts/field-study.sh](scripts/field-study.sh) reproduces the scan.
+
 ## Pairs with evalsmith-mcp
 
 [evalsmith-mcp](https://github.com/diegoperezg7/evalsmith-mcp) answers "does the agent do the right thing?" (retrieval metrics, tool-call checks, prompt regression gates). mcp-guard answers "is it safe to let the agent use these tools at all?". Both are CLIs with exit codes meant for the same CI pipeline: evalsmith gates quality, mcp-guard gates the attack surface.

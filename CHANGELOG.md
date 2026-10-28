@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- MCPG-003 no longer reports a warning against sharing secrets ("Do not include any API keys or
+  passwords in your query") as an exfiltration request. Found in the [field study](docs/field-study.md).
+
 ## [1.0.0] - 2026-10-28
 
 First public release.
@@ -29,4 +36,5 @@ First public release.
 
 - Licensed under the Apache License 2.0.
 
+[Unreleased]: https://github.com/diegoperezg7/mcp-guard/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/diegoperezg7/mcp-guard/releases/tag/v1.0.0
