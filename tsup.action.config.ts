@@ -13,7 +13,7 @@ export default defineConfig({
   splitting: false,
   sourcemap: false,
   minify: false,
-  clean: true,
+  clean: ["!licenses.txt"],
   dts: false,
   // Bundled CommonJS dependencies call require() for Node built-ins.
   banner: {

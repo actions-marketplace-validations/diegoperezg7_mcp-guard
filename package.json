@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "build": "tsup",
-    "build:action": "tsup --config tsup.action.config.ts",
+    "build:action": "tsup --config tsup.action.config.ts && node scripts/third-party-licenses.mjs",
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
