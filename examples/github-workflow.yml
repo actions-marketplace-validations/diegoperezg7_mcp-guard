@@ -1,7 +1,6 @@
 # Integration example: how mcp-guard fits into the CI of an MCP server repository.
-# The workflow fails the pull request on any high
-# or critical finding and shows every finding in the Security tab (Code
-# scanning) and in the job summary.
+# The workflow fails the pull request on any high or critical finding, writes the
+# report to the job summary and shows every finding in the Security tab (Code scanning).
 name: mcp-guard
 
 on:
@@ -17,30 +16,29 @@ jobs:
   scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
 
       # Build your server first, e.g. npm ci && npm run build.
 
-      # Pin a reviewed commit rather than a moving branch: this is a security tool in your pipeline.
-      - name: Install mcp-guard
-        run: npm install --no-save "github:diegoperezg7/mcp-guard#<commit-sha>"
-
+      # This is a security tool in your pipeline: consider pinning a full commit SHA
+      # instead of the moving v1 tag.
       - name: Scan the server
-        run: >
-          npx mcp-guard scan
-          --stdio "node dist/server.js"
-          --fail-on high
-          --format markdown
-          --output sarif:mcp-guard.sarif
-          >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload SARIF
-        if: ${{ !cancelled() }}
-        uses: github/codeql-action/upload-sarif@v3
+        id: mcp-guard
+        uses: diegoperezg7/mcp-guard@v1
         with:
-          sarif_file: mcp-guard.sarif
+          stdio: node dist/server.js
+          fail-on: high
+          sarif-file: mcp-guard.sarif
+
+      # The action writes SARIF; uploading it is a separate step, so it also runs
+      # when the scan step fails on findings.
+      - name: Upload SARIF
+        if: ${{ !cancelled() && steps.mcp-guard.outputs.sarif-file != '' }}
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: ${{ steps.mcp-guard.outputs.sarif-file }}
           category: mcp-guard
